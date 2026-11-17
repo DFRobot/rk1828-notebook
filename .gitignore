@@ -1,0 +1,10 @@
+# 运行时下载/生成的内容（不提交）
+models/
+datasets/
+demos/
+*.part
+__pycache__/
+.ipynb_checkpoints/
+jupyter.log
+embedding_out.bin
+out.wav
