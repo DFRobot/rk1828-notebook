@@ -212,13 +212,29 @@ print(f"{len(LABELS)} 个类别。选好后继续往下运行 ▼")
 我们把图片缩放到 224×224 并加上 batch 维度。
 """),
         code("""
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from vision_post import setup_cjk_font
 
-img = Image.open(w_image.value).convert("RGB").resize((224, 224))
+setup_cjk_font()
+img_orig = Image.open(w_image.value).convert("RGB")
+img = img_orig.resize((224, 224))
 x = np.asarray(img)[None]  # [1,224,224,3] uint8 NHWC
 print("输入张量:", x.shape, x.dtype)
-img
+
+# 前处理每个阶段都画出来：原图 -> resize -> 输入张量
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.8))
+for ax, im, title in [
+    (axes[0], img_orig, f"1. 原图 {img_orig.size[0]}x{img_orig.size[1]}"),
+    (axes[1], img, "2. resize 224x224"),
+    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+]:
+    ax.imshow(np.asarray(im))
+    ax.set_title(title)
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
 """),
         md("""
 ## 4. RKNN 推理
@@ -354,14 +370,29 @@ YOLO 要求 640×640 正方形输入。直接拉伸会改变物体长宽比，�
 并记下缩放比例和 padding —— 后处理时要用它们把框还原回原图坐标。
 """),
         code("""
+import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
-from vision_post import letterbox, to_input_array
+from vision_post import letterbox, to_input_array, setup_cjk_font
 
+setup_cjk_font()
 img = Image.open(w_image.value).convert("RGB")
 img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
 x = to_input_array(img_lb)
 print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
-img_lb
+
+# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+for ax, im, title in [
+    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
+    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+]:
+    ax.imshow(np.asarray(im))
+    ax.set_title(title)
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
 """),
         md("""
 ## 4. RKNN 推理
@@ -567,14 +598,29 @@ print("选好后继续往下运行 ▼")
 ## 3. 前处理：letterbox
 """),
         code("""
+import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
-from vision_post import letterbox, to_input_array
+from vision_post import letterbox, to_input_array, setup_cjk_font
 
+setup_cjk_font()
 img = Image.open(w_image.value).convert("RGB")
 img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
 x = to_input_array(img_lb)
-print(f"原图 {img.size} -> 输入 {x.shape}")
-img_lb
+print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+
+# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+for ax, im, title in [
+    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
+    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+]:
+    ax.imshow(np.asarray(im))
+    ax.set_title(title)
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
 """),
         md("""
 ## 4. RKNN 推理
