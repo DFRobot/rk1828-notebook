@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
-"""视觉模型（YOLO 系列 / FastSAM）的通用前后处理。
+"""Shared pre/post-processing for the vision models (YOLO family / FastSAM).
 
-notebook 01-05 共用。所有函数都是纯 numpy/PIL 实现。
+Used by notebooks 01-05. Everything is pure numpy/PIL.
 """
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# ---------------------------------------------------------------- 绘图
+# ---------------------------------------------------------------- plotting
 
 def setup_cjk_font():
-    """配置 matplotlib 中文字体（找不到 CJK 字体时保持默认）。"""
+    """Configure a CJK-capable matplotlib font (keeps default if none found)."""
     import matplotlib
     from matplotlib import font_manager
-    # matplotlib 对 .ttc 只注册第一个字模（通常是 JP），JP 字体也含简体中文字形
+    # matplotlib registers only the first face of a .ttc (usually JP);
+    # JP fonts also contain simplified-Chinese glyphs
     for f in ("Noto Sans CJK JP", "Noto Serif CJK JP",
               "Noto Sans CJK SC", "Noto Serif CJK SC",
               "WenQuanYi Zen Hei", "WenQuanYi Micro Hei"):
@@ -25,13 +26,13 @@ def setup_cjk_font():
     matplotlib.rcParams["axes.unicode_minus"] = False
 
 
-# ---------------------------------------------------------------- 前处理
+# ---------------------------------------------------------------- pre-processing
 
 def letterbox(img, size=640, pad=(114, 114, 114)):
-    """等比缩放 + 灰边填充到 size×size。
+    """Aspect-preserving resize + gray padding to size x size.
 
-    返回 (填充后的 PIL.Image, scale, pad_x, pad_y)。
-    坐标还原: x_orig = (x_model - pad_x) / scale
+    Returns (padded PIL.Image, scale, pad_x, pad_y).
+    Coordinate restore: x_orig = (x_model - pad_x) / scale
     """
     w, h = img.size
     scale = min(size / w, size / h)
@@ -44,14 +45,15 @@ def letterbox(img, size=640, pad=(114, 114, 114)):
 
 
 def to_input_array(img):
-    """PIL.Image -> [1,H,W,3] uint8（NHWC，模型内置归一化）。"""
+    """PIL.Image -> [1,H,W,3] uint8 (NHWC; normalization is baked into the model)."""
     return np.asarray(img.convert("RGB"))[None]
 
 
-# ---------------------------------------------------------------- 反量化
+# ---------------------------------------------------------------- dequant
 
 def dequant(arr, attr):
-    """按输出 tensor 的量化参数还原成 float32。非量化输出原样返回。"""
+    """Restore a float32 tensor using the tensor's quantization params.
+    Non-quantized tensors are returned as float32 unchanged."""
     arr = np.asarray(arr)
     if getattr(attr, "dtype", None) == 2 and attr.qnt_info.scale != 0:  # INT8
         return (arr.astype(np.float32) - attr.qnt_info.zero_point) * attr.qnt_info.scale
@@ -73,7 +75,7 @@ def box_iou(box, boxes):
 
 
 def nms(boxes, scores, iou_thresh=0.45, classes=None):
-    """NMS。classes 不为 None 时按类别分别做；返回按分数降序的下标。"""
+    """NMS. Per-class when `classes` is given; returns indices sorted by score desc."""
     if classes is None:
         classes = np.zeros(len(boxes), dtype=np.int64)
     keep = []
@@ -92,17 +94,17 @@ def nms(boxes, scores, iou_thresh=0.45, classes=None):
 
 
 def unletterbox_boxes(boxes, scale, pad_x, pad_y, orig_w, orig_h):
-    """把模型输入坐标系下的框映射回原图。"""
+    """Map boxes from the model-input coordinate system back to the original image."""
     boxes = boxes.copy().astype(np.float32)
     boxes[:, [0, 2]] = np.clip((boxes[:, [0, 2]] - pad_x) / scale, 0, orig_w)
     boxes[:, [1, 3]] = np.clip((boxes[:, [1, 3]] - pad_y) / scale, 0, orig_h)
     return boxes
 
 
-# ---------------------------------------------------------------- YOLO 解码
+# ---------------------------------------------------------------- YOLO decoding
 
 def _group_heads(outputs, output_attrs):
-    """把 YOLO26 的多个输出头按网格大小分组: {grid_h: {channels: array[c,h,w]}}。"""
+    """Group YOLO26 output heads by grid size: {grid_h: {channels: array[c,h,w]}}."""
     branches = {}
     for arr, attr in zip(outputs, output_attrs):
         a = dequant(arr, attr)
@@ -114,7 +116,7 @@ def _group_heads(outputs, output_attrs):
 
 
 def _decode_boxes_ltrb(box_head):
-    """YOLO26 直接回归 (l,t,r,b)（无 DFL），还原为输入坐标系 xyxy [h*w,4]。"""
+    """YOLO26 regresses (l,t,r,b) directly (no DFL); restore to input-space xyxy [h*w,4]."""
     gh, gw = box_head.shape[1], box_head.shape[2]
     stride = 640 // gh
     row, col = np.meshgrid(np.arange(gh), np.arange(gw), indexing="ij")
@@ -128,10 +130,12 @@ def _decode_boxes_ltrb(box_head):
 def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -60, 60)))
 
-def decode_builtin_nms(output, conf_thresh=0.4):
-    """YOLOv5/v6/v8：模型内置 decode+NMS，输出 [1,K,6] = (score, class, x1, y1, x2, y2)。
 
-    返回 (boxes[K,4], classes[K], scores[K])（模型输入坐标系）。
+def decode_builtin_nms(output, conf_thresh=0.4):
+    """YOLOv5/v6/v8: decode+NMS is built into the model; output is
+    [1,K,6] = (score, class, x1, y1, x2, y2).
+
+    Returns (boxes[K,4], classes[K], scores[K]) in model-input coordinates.
     """
     det = np.asarray(output, dtype=np.float32)
     if det.ndim == 3:
@@ -147,39 +151,20 @@ def decode_builtin_nms(output, conf_thresh=0.4):
 
 def decode_yolo26_heads(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
                         num_classes=80):
-    """YOLO26：6 个原始检测头（box + score，stride 8/16/32），host 端解码。
+    """YOLO26: 6 raw heads (box + score at strides 8/16/32), decoded on the host.
 
-    返回 (boxes[K,4], classes[K], scores[K])（模型输入坐标系）。
+    Returns (boxes[K,4], classes[K], scores[K]) in model-input coordinates.
     """
-    def sigmoid(x):
-        return 1.0 / (1.0 + np.exp(-np.clip(x, -60, 60)))
-
-    # 按网格大小分组: box 头 shape=[1,4,h,w]，score 头 shape=[1,80,h,w]
-    branches = {}
-    for arr, attr in zip(outputs, output_attrs):
-        a = dequant(arr, attr)
-        if a.ndim == 4 and a.shape[0] == 1:
-            a = a[0]
-        c, h, w = a.shape
-        branches.setdefault(h, {})[c] = a  # c=4 -> box, c=80 -> score
-
+    branches = _group_heads(outputs, output_attrs)
     all_boxes, all_scores, all_classes = [], [], []
     for h in sorted(branches, reverse=True):
         pair = branches[h]
         box_head, score_head = pair[4], pair[num_classes]
-        gh, gw = box_head.shape[1], box_head.shape[2]
-        stride = 640 // gh
-        row, col = np.meshgrid(np.arange(gh), np.arange(gw), indexing="ij")
-        # YOLO26 直接回归 (l,t,r,b)，无 DFL
-        x1 = (-box_head[0] + col + 0.5) * stride
-        y1 = (-box_head[1] + row + 0.5) * stride
-        x2 = (box_head[2] + col + 0.5) * stride
-        y2 = (box_head[3] + row + 0.5) * stride
-        boxes = np.stack([x1, y1, x2, y2], -1).reshape(-1, 4)
+        boxes = _decode_boxes_ltrb(box_head)
 
         prob = score_head
-        if prob.min() < 0 or prob.max() > 1:  # logits -> 概率
-            prob = sigmoid(prob)
+        if prob.min() < 0 or prob.max() > 1:  # logits -> probabilities
+            prob = _sigmoid(prob)
         prob = prob.transpose(1, 2, 0).reshape(-1, num_classes)
         scores = prob.max(1)
         classes = prob.argmax(1)
@@ -197,10 +182,11 @@ def decode_yolo26_heads(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
 
 def decode_yolo26_pose(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
                        num_keypoints=17):
-    """YOLO26-pose：每个分支 box[1,4,h,w] + score[1,1,h,w] + kpt[1,K*3,h,w]。
+    """YOLO26-pose: per branch box[1,4,h,w] + score[1,1,h,w] + kpt[1,K*3,h,w].
 
-    返回 (boxes[K,4] xyxy, scores[K], keypoints[K,17,3])（模型输入坐标系）；
-    keypoints[...,2] 是 sigmoid 后的关键点置信度。pose 只检测 person 单类别。
+    Returns (boxes[K,4] xyxy, scores[K], keypoints[K,17,3]) in model-input
+    coordinates; keypoints[...,2] is the sigmoided keypoint confidence.
+    Pose detects a single class (person).
     """
     kc = num_keypoints * 3
     branches = _group_heads(outputs, output_attrs)
@@ -216,11 +202,12 @@ def decode_yolo26_pose(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
 
         boxes = _decode_boxes_ltrb(box_head)
         prob = score_head[0]
-        if prob.min() < 0 or prob.max() > 1:  # logits -> 概率
+        if prob.min() < 0 or prob.max() > 1:  # logits -> probabilities
             prob = _sigmoid(prob)
         keep = prob.ravel() >= conf_thresh
 
-        # 关键点: 通道 3k/3k+1 为相对网格中心的偏移，3k+2 为置信度 logit
+        # keypoints: channels 3k/3k+1 are offsets from the grid center,
+        # 3k+2 is the confidence logit
         kx = (kpt_head[0::3] + col + 0.5) * stride            # [17,h,w]
         ky = (kpt_head[1::3] + row + 0.5) * stride
         kp = _sigmoid(kpt_head[2::3])
@@ -243,18 +230,19 @@ def decode_yolo26_pose(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
 
 def decode_yolo26_seg(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
                       num_classes=80, mask_dim=32):
-    """YOLO26-seg：每个分支 box[1,4,h,w] + score[1,80,h,w] + mask系数[1,32,h,w]，
-    外加一个 proto 头 [1,32,160,160]。
+    """YOLO26-seg: per branch box[1,4,h,w] + score[1,80,h,w] + mask
+    coefficients[1,32,h,w], plus one proto head [1,32,160,160].
 
-    返回 (boxes[K,4], classes[K], scores[K], masks[K,160,160])（模型输入坐标系）。
+    Returns (boxes[K,4], classes[K], scores[K], masks[K,160,160]) in
+    model-input coordinates.
     """
     branches = _group_heads(outputs, output_attrs)
     proto = None
     for h, pair in branches.items():
-        if mask_dim in pair and 4 not in pair:  # 只有 proto 头没有配对的 box 头
+        if mask_dim in pair and 4 not in pair:  # only the proto head has no box
             proto = pair[mask_dim]
     if proto is None:
-        raise ValueError("未找到 mask proto 头 [1,32,160,160]")
+        raise ValueError("mask proto head [1,32,160,160] not found")
 
     all_boxes, all_scores, all_classes, all_coeffs = [], [], [], []
     for h in sorted(branches, reverse=True):
@@ -265,7 +253,7 @@ def decode_yolo26_seg(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
 
         boxes = _decode_boxes_ltrb(box_head)
         prob = score_head
-        if prob.min() < 0 or prob.max() > 1:  # logits -> 概率
+        if prob.min() < 0 or prob.max() > 1:  # logits -> probabilities
             prob = _sigmoid(prob)
         prob = prob.transpose(1, 2, 0).reshape(-1, num_classes)
         scores = prob.max(1)
@@ -294,22 +282,24 @@ def decode_yolo26_seg(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
 
 
 def unletterbox_keypoints(kpts, scale, pad_x, pad_y):
-    """关键点坐标从模型输入系映射回原图（kpts [...,3]，最后一维 x,y,conf）。"""
+    """Map keypoints from model-input coordinates back to the original image
+    (kpts [...,3], last dim = x,y,conf)."""
     kpts = kpts.copy().astype(np.float32)
     kpts[..., 0] = (kpts[..., 0] - pad_x) / scale
     kpts[..., 1] = (kpts[..., 1] - pad_y) / scale
     return kpts
 
 
-
-# ---------------------------------------------------------------- FastSAM 解码
+# ---------------------------------------------------------------- FastSAM decoding
 
 def decode_fastsam(outputs, conf_thresh=0.4, nms_thresh=0.7, mask_thresh=0.5):
-    """FastSAM-s 后处理。
+    """FastSAM-s post-processing.
 
-    output0: [1,37,8400] = cx,cy,w,h,conf + 32 个 mask 系数（已解码到输入尺度）
+    output0: [1,37,8400] = cx,cy,w,h,conf + 32 mask coefficients (decoded,
+    input scale)
     output1: [1,32,160,160] mask prototypes
-    返回 (boxes[K,4] xyxy, scores[K], masks[K,160,160] float)（模型输入坐标系）。
+    Returns (boxes[K,4] xyxy, scores[K], masks[K,160,160] float) in
+    model-input coordinates.
     """
     det = np.asarray(outputs[0], dtype=np.float32)
     if det.ndim == 3:
@@ -336,7 +326,8 @@ def decode_fastsam(outputs, conf_thresh=0.4, nms_thresh=0.7, mask_thresh=0.5):
 
 
 def scale_masks(masks, boxes, out_shape, scale, pad_x, pad_y, input_size=640):
-    """把 [K,160,160] 的 mask 放大到输入尺寸、按框裁剪，再映射回原图尺寸。"""
+    """Upscale [K,160,160] masks to input size, crop to the box, then map
+    back to the original image size."""
     from cv2 import resize as cv2_resize
     k = len(masks)
     up = np.stack([cv2_resize(m, (input_size, input_size)) for m in masks]) if k else masks
@@ -347,7 +338,7 @@ def scale_masks(masks, boxes, out_shape, scale, pad_x, pad_y, input_size=640):
         xi1, yi1 = int(max(x1, 0)), int(max(y1, 0))
         xi2, yi2 = int(min(x2, input_size)), int(min(y2, input_size))
         crop[yi1:yi2, xi1:xi2] = up[i][yi1:yi2, xi1:xi2]
-        # 去掉 letterbox 灰边再缩放回原图
+        # strip the letterbox padding, then resize to the original image
         ox1, oy1 = pad_x, pad_y
         ox2 = input_size - (input_size - int(round(out_shape[1] * scale)) - pad_x)
         oy2 = input_size - (input_size - int(round(out_shape[0] * scale)) - pad_y)
@@ -356,20 +347,43 @@ def scale_masks(masks, boxes, out_shape, scale, pad_x, pad_y, input_size=640):
     return out
 
 
-# ---------------------------------------------------------------- 画图
+# ---------------------------------------------------------------- drawing
 
 _PALETTE = [(255, 56, 56), (255, 157, 51), (255, 225, 52), (87, 210, 60),
             (0, 210, 210), (62, 120, 255), (168, 62, 255), (255, 62, 168)]
 
-# COCO 17 关键点: 0鼻 1左眼 2右眼 3左耳 4右耳 5左肩 6右肩 7左肘 8右肘
-# 9左腕 10右腕 11左髋 12右髋 13左膝 14右膝 15左踝 16右踝
+# COCO 17 keypoints: 0 nose, 1 left eye, 2 right eye, 3 left ear, 4 right ear,
+# 5 left shoulder, 6 right shoulder, 7 left elbow, 8 right elbow, 9 left wrist,
+# 10 right wrist, 11 left hip, 12 right hip, 13 left knee, 14 right knee,
+# 15 left ankle, 16 right ankle
 COCO_SKELETON = [(0, 1), (0, 2), (1, 3), (2, 4), (0, 5), (0, 6),
                  (5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12),
                  (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)]
 
 
+def draw_boxes(img, boxes, classes, scores, labels=None):
+    """Draw detection boxes + labels on a PIL.Image; returns a new image."""
+    img = img.copy()
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+    except Exception:  # noqa: BLE001
+        font = ImageFont.load_default()
+    for i, (box, cls, score) in enumerate(zip(boxes, classes, scores)):
+        color = _PALETTE[int(cls) % len(_PALETTE)]
+        x1, y1, x2, y2 = [float(v) for v in box]
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+        name = labels[int(cls)] if labels is not None and int(cls) < len(labels) else str(int(cls))
+        text = f"{name} {score:.2f}"
+        tw = draw.textlength(text, font=font)
+        draw.rectangle([x1, y1 - 18, x1 + tw + 6, y1], fill=color)
+        draw.text((x1 + 3, y1 - 16), text, fill=(255, 255, 255), font=font)
+    return img
+
+
 def draw_pose(img, boxes, scores, keypoints, kpt_thresh=0.5):
-    """在 PIL.Image 上画人体框 + COCO 17 关键点骨架，返回新图。"""
+    """Draw person boxes + COCO 17-keypoint skeletons on a PIL.Image."""
     img = img.copy()
     draw = ImageDraw.Draw(img)
     try:
@@ -396,29 +410,8 @@ def draw_pose(img, boxes, scores, keypoints, kpt_thresh=0.5):
     return img
 
 
-def draw_boxes(img, boxes, classes, scores, labels=None):
-    """在 PIL.Image 上画检测框 + 标签，返回新图。"""
-    img = img.copy()
-    draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
-    except Exception:  # noqa: BLE001
-        font = ImageFont.load_default()
-    for i, (box, cls, score) in enumerate(zip(boxes, classes, scores)):
-        color = _PALETTE[int(cls) % len(_PALETTE)]
-        x1, y1, x2, y2 = [float(v) for v in box]
-        draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
-        name = labels[int(cls)] if labels is not None and int(cls) < len(labels) else str(int(cls))
-        text = f"{name} {score:.2f}"
-        tw = draw.textlength(text, font=font)
-        draw.rectangle([x1, y1 - 18, x1 + tw + 6, y1], fill=color)
-        draw.text((x1 + 3, y1 - 16), text, fill=(255, 255, 255), font=font)
-    return img
-
-
 def draw_masks(img, masks, alpha=0.45):
-    """把二值/概率 mask 以半透明色块叠加到 PIL.Image 上。"""
+    """Overlay binary/probability masks as translucent colors on a PIL.Image."""
     base = np.asarray(img.convert("RGB"), dtype=np.float32)
     for i, m in enumerate(masks):
         color = np.array(_PALETTE[i % len(_PALETTE)], dtype=np.float32)

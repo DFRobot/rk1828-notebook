@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""重建 rk1828-notebook 下全部 16 个 notebook。
+"""Regenerate all 17 notebooks under rk1828-notebook (English edition).
 
-用法: python3 _build_notebooks.py
-依赖: /home/ubuntu/hugging_face/ 下的 qhddz HF 仓库（用于枚举每个仓库的文件列表，
-     生成 notebook 第一步"下载模型"的 FILES 清单）。
+Usage: python3 _build_notebooks.py
+Depends on the qhddz HF repos under /home/ubuntu/hugging_face/ (used to
+enumerate each repo's file list for the "download models" first step).
 
-每个 notebook 统一结构:
-  0. 环境检查
-  1. 下载模型（下拉框选择 HF / HF-Mirror，已存在的文件自动跳过）
-  2. ... demo 具体步骤
+Every notebook shares the same structure:
+  0. Environment check
+  1. Download models (from huggingface.co; existing files are skipped)
+  2. ... demo-specific steps
 """
 import json
 import os
@@ -20,7 +20,7 @@ EXCLUDE = {".gitattributes", "README.md", "output.npy", "out.wav",
            "convert_left.jpg", "convert_right.jpg"}
 
 
-# ---------------------------------------------------------------- 工具
+# ---------------------------------------------------------------- helpers
 
 def md(src):
     return {"cell_type": "markdown", "metadata": {},
@@ -45,7 +45,7 @@ def notebook(cells):
 
 
 def repo_files(repo, dest_prefix):
-    """枚举 HF 仓库文件 -> (repo, remote, local) 列表。"""
+    """Enumerate HF repo files -> (repo, remote, local) list."""
     out = []
     root = os.path.join(HF_DIR, repo)
     for dirpath, dirnames, filenames in os.walk(root):
@@ -63,75 +63,75 @@ def files_literal(files, indent="    "):
     return "[\n" + "\n".join(lines) + "\n]"
 
 
-# ---------------------------------------------------------------- 公共单元格
+# ---------------------------------------------------------------- shared cells
 
 ENV_MD = md("""
-## 0. 环境检查
+## 0. Environment check
 
-先确认 RKNN3 运行库（`librknn3_api.so`）和 RK1828 设备都正常。
-如失败，请先安装驱动/运行时（`rknn3-rk182x` DEB 包），并用 `sudo rknn-smi info` 确认能看到 RK1828。
+Make sure the RKNN3 runtime (`librknn3_api.so`) and the RK1828 device are ready.
+If this fails, install the driver/runtime first (the `rknn3-rk182x` DEB package)
+and check with `sudo rknn-smi info` that the RK1828 shows up.
 """)
 
 ENV_CODE = code("""
 from rknn3 import get_lib, find_devices
 
-_ = get_lib()  # 加载 /usr/lib/librknn3_api.so；失败说明 Runtime 未安装
+_ = get_lib()  # loads /usr/lib/librknn3_api.so; failure means the runtime is not installed
 
 devices = find_devices()
 if not devices:
-    raise RuntimeError("未发现 RK1828 设备！请检查: sudo rknn-smi info")
+    raise RuntimeError("No RK1828 device found! Check: sudo rknn-smi info")
 for dev_id, dev_type in devices:
-    print(f"发现设备: id={dev_id}  接口={dev_type}")
+    print(f"Found device: id={dev_id}  interface={dev_type}")
 """)
 
 
 def download_cells(files, intro=None):
-    """第一步：下载模型（下拉选择下载源 + 跳过已存在）。"""
+    """Step 1: download models (from huggingface.co; existing files skipped)."""
     md_src = """
-## 1. 下载模型
+## 1. Download models
 
-本 demo 的模型文件托管在 Hugging Face（`qhddz` 账号）。
-**先用下拉框选择下载源**，再运行下一个单元格开始下载：
+The models for this demo are hosted on Hugging Face (account `qhddz`) and are
+downloaded directly from **huggingface.co**. Run the next cell to start.
 
-- **HF-Mirror 国内镜像**：`hf-mirror.com`，国内直连，推荐
-- **Hugging Face 官方**：`huggingface.co`，海外或已有代理时用
-
-> 已存在（且非空）的文件会**自动跳过**，重复运行不会重新下载。
+> Files that already exist (and are non-empty) are **skipped automatically** —
+> re-running never downloads them twice.
+> If your network cannot reach huggingface.co, set up a proxy first, e.g.
+> `export https_proxy=http://<your-proxy>:<port>` before starting Jupyter.
 """
     if intro:
         md_src += "\n\n" + intro
     return [
         md(md_src),
         code(f"""
-from nb_download import source_picker
-
-# (HF仓库名, 仓库内路径, 本地路径)
+# (HF repo, path in repo, local path)
 FILES = {files_literal(files)}
-
-w_source = source_picker()
 """),
         code("""
 from nb_download import ensure_files
 
-ensure_files(FILES, w_source.value)
+ensure_files(FILES, "hf")
 """),
     ]
 
 
 EXTRACT_MD = md("""
-## 2. 解压预编译 demo
+## 2. Extract the prebuilt demo
 
-`demo_x86_64.tar.gz` 里是官方流程编译好的 x86_64 C++ demo 和运行时库（`lib/`）。
-HF 不允许直接托管可执行文件，所以打包成 tar.gz，解压一次即可（重复运行自动跳过）。
+`demo_x86_64.tar.gz` contains the official x86_64 C++ demo and its runtime
+libraries (`lib/`). Hugging Face does not host raw executables, so they are
+shipped as a tarball; extract once (re-running skips automatically).
 
-> **为什么这个 demo 用 C++ 而不是纯 Python？**
-> 01-05（分类/检测/FastSAM/pose/分割）是单个模型一次前向，后处理简单，
-> 所以用 Python（`rknn3.py`）逐步演示。而本 demo 的流水线复杂得多——
-> 多模型串联、tokenizer、KV cache、滑窗/流式状态等，前后处理和编排逻辑
-> 有几百上千行，重写 Python 版成本高且容易和官方实现不一致。
-> 因此直接运行官方 `rknn3-model-zoo` 编译的 C++ demo，
-> 源码见 [github.com/airockchip/rknn3-model-zoo](https://github.com/airockchip/rknn3-model-zoo)
-> 的 `examples/` 目录。
+> **Why a C++ demo instead of pure Python?**
+> Notebooks 01-05 (classification / detection / FastSAM / pose / segmentation)
+> are a single model with one forward pass and simple post-processing, so they
+> walk through everything in Python (`rknn3.py`). This demo's pipeline is far
+> more complex — chained models, tokenizer, KV cache, sliding-window /
+> streaming state, hundreds of lines of orchestration — reimplementing it in
+> Python would be costly and risk diverging from the official behavior.
+> So we run the official `rknn3-model-zoo` C++ demo directly; source code:
+> [github.com/airockchip/rknn3-model-zoo](https://github.com/airockchip/rknn3-model-zoo)
+> under `examples/`.
 """)
 
 
@@ -155,7 +155,7 @@ from nb_demo import run_demo, snapshot, new_files, show_images, show_new_images,
 """)
 
 
-# ================================================================ 01 分类
+# ================================================================ 01 classification
 
 def build_01():
     files = []
@@ -169,36 +169,36 @@ def build_01():
 
     cells = [
         md("""
-# RK1828 图像分类 Demo（MobileNetV2 / ResNet50-v2）
+# RK1828 Image Classification Demo (MobileNetV2 / ResNet50-v2)
 
-本 notebook 在 **RK1828 AI 协处理器**（PCIe 连接，20 TOPS NPU）上运行 ImageNet 图像分类，
-完整演示 AI 推理的标准流程：
+This notebook runs ImageNet classification on the **RK1828 AI coprocessor**
+(PCIe-attached, 20 TOPS NPU) and walks through the full inference pipeline:
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 选择模型和图片 |
-| 3 | 前处理（把图片变成模型能吃的张量） |
-| 4 | RKNN 推理（在 NPU 上运行） |
-| 5 | 后处理（反量化 + Softmax，输出 Top-5） |
-| 6 | 多模型对比（2 模型 × 2 量化全量跑一遍） |
+| 1 | Download models (from huggingface.co) |
+| 2 | Pick a model and an image |
+| 3 | Pre-processing (turn the image into a tensor) |
+| 4 | RKNN inference (on the NPU) |
+| 5 | Post-processing (dequantize + Softmax, Top-5) |
+| 6 | Multi-model comparison (2 models x 2 quantizations) |
 
-> 小知识：**i8** 是把权重压成 8bit 整数的量化版本，更小更快；
-> **fp16** 是 16bit 浮点版本。两种都可以跑一遍对比结果。
+> Background: **i8** quantizes the weights to 8-bit integers (smaller, faster);
+> **fp16** is the 16-bit float version. Run both and compare.
 """),
         ENV_MD, ENV_CODE,
     ]
     cells += download_cells(
         files,
-        intro="本 demo 会下载 MobileNetV2 和 ResNet50-v2 两个模型（各 i8/fp16 两版），"
-              "以及 ImageNet 标签和示例图片。")
+        intro="This demo downloads MobileNetV2 and ResNet50-v2 (i8 and fp16 each), "
+              "plus the ImageNet labels and a sample image.")
     cells += [
         md("""
-## 2. 选择模型和图片
+## 2. Pick a model and an image
 
-- **模型**：`mobilenet_v2`（轻量，3.4M 参数）或 `resnet50_v2`（经典，25M 参数）
-- **量化版本**：`i8`（int8 量化）或 `fp16`（半精度浮点）
-- **图片**：`datasets/` 里的示例图（也可以自己放 224×224 左右的图片进去）
+- **Model**: `mobilenet_v2` (lightweight, 3.4M params) or `resnet50_v2` (classic, 25M params)
+- **Quantization**: `i8` (int8) or `fp16` (half precision)
+- **Image**: samples under `datasets/` (you can drop your own ~224x224 image there)
 """),
         code("""
 import glob
@@ -206,20 +206,20 @@ import ipywidgets as widgets
 from IPython.display import display
 
 w_model = widgets.Dropdown(options=["mobilenet_v2", "resnet50_v2"],
-                           description="模型:")
-w_quant = widgets.Dropdown(options=["i8", "fp16"], description="量化:")
+                           description="Model:")
+w_quant = widgets.Dropdown(options=["i8", "fp16"], description="Quant:")
 w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
-                           description="图片:", layout=widgets.Layout(width="60%"))
+                           description="Image:", layout=widgets.Layout(width="60%"))
 display(w_model, w_quant, w_image)
 
 LABELS = open("datasets/imagenet_labels.txt").read().splitlines()
-print(f"{len(LABELS)} 个类别。选好后继续往下运行 ▼")
+print(f"{len(LABELS)} classes. Then keep running downwards ▼")
 """),
         md("""
-## 3. 前处理
+## 3. Pre-processing
 
-模型输入是 **224×224 NHWC uint8 RGB**（归一化已烘焙进模型，无需减均值除方差）。
-我们把图片缩放到 224×224 并加上 batch 维度。
+The model takes **224x224 NHWC uint8 RGB** (normalization is baked into the
+model — no mean/std needed). We resize the image to 224x224 and add a batch dim.
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -231,14 +231,14 @@ setup_cjk_font()
 img_orig = Image.open(w_image.value).convert("RGB")
 img = img_orig.resize((224, 224))
 x = np.asarray(img)[None]  # [1,224,224,3] uint8 NHWC
-print("输入张量:", x.shape, x.dtype)
+print("input tensor:", x.shape, x.dtype)
 
-# 前处理每个阶段都画出来：原图 -> resize -> 输入张量
+# show every pre-processing stage: original -> resize -> input tensor
 fig, axes = plt.subplots(1, 3, figsize=(11, 3.8))
 for ax, im, title in [
-    (axes[0], img_orig, f"1. 原图 {img_orig.size[0]}x{img_orig.size[1]}"),
+    (axes[0], img_orig, f"1. original {img_orig.size[0]}x{img_orig.size[1]}"),
     (axes[1], img, "2. resize 224x224"),
-    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+    (axes[2], x[0], f"3. model input {x.shape}\\nuint8 NHWC"),
 ]:
     ax.imshow(np.asarray(im))
     ax.set_title(title)
@@ -247,9 +247,10 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 4. RKNN 推理
+## 4. RKNN inference
 
-加载 `.rknn`（计算图）+ `.weight`（权重）到 RK1828，执行一次推理并计时。
+Load the `.rknn` (compute graph) + `.weight` (weights) onto the RK1828 and run
+one timed inference.
 """),
         code("""
 import time
@@ -257,19 +258,19 @@ from rknn3 import Rknn3Model
 
 model_path = f"models/cnn/{w_model.value}/{w_quant.value}/{w_model.value}.rknn"
 model = Rknn3Model(model_path)
-print("输入属性:", model.input_attrs)
-print("输出属性:", model.output_attrs)
+print("input attrs:", model.input_attrs)
+print("output attrs:", model.output_attrs)
 
-_ = model.infer([x])  # 预热
+_ = model.infer([x])  # warmup
 t0 = time.time()
 outputs = model.infer([x])
-print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+print(f"inference time: {(time.time()-t0)*1000:.1f} ms")
 """),
         md("""
-## 5. 后处理：反量化 + Softmax
+## 5. Post-processing: dequantize + Softmax
 
-i8 模型的输出是 int8，要用输出张量自带的 `scale` / `zero_point` 还原成浮点 logits；
-再 Softmax 取 Top-5。
+The i8 model outputs int8; restore float logits with the output tensor's own
+`scale` / `zero_point`, then Softmax and take the Top-5.
 """),
         code("""
 from vision_post import dequant
@@ -294,7 +295,7 @@ axes[0].set_title(f"{w_model.value} ({w_quant.value})")
 axes[0].axis("off")
 names = [LABELS[i] for i in top5][::-1]
 axes[1].barh(names, [probs[i] for i in top5][::-1], color="#3b82f6")
-axes[1].set_title("Top-5 概率")
+axes[1].set_title("Top-5 probability")
 axes[1].set_xlim(0, 1)
 plt.tight_layout()
 plt.show()
@@ -302,11 +303,12 @@ plt.show()
 model.close()
 """),
         md("""
-## 6. 多模型对比（i8 + fp16 全量）
+## 6. Multi-model comparison (i8 + fp16, full sweep)
 
-同一张图，把 **2 个模型 × 2 种量化（i8 / fp16）共 4 组**全部跑一遍。
-运行过程实时打印进度；全部完成后输出对比表格、耗时柱状图和 Top-5 效果拼图。
-每个模型计时 3 次取最快（排除首次预热抖动）。
+Same image, running **2 models x 2 quantizations (i8 / fp16) = 4 combos**.
+Progress is printed live; afterwards you get a comparison table, a latency
+bar chart, and a Top-5 mosaic. Each model is timed 3 times and the best is
+kept (warm-up jitter excluded).
 """),
         code("""
 import time
@@ -322,9 +324,9 @@ step = 0
 for name in ALL_MODELS:
     for quant in QUANTS:
         step += 1
-        print(f"[{step}/{total}] 加载 {name} ({quant}) ...", flush=True)
+        print(f"[{step}/{total}] loading {name} ({quant}) ...", flush=True)
         m = Rknn3Model(f"models/cnn/{name}/{quant}/{name}.rknn")
-        m.infer([x])  # 预热
+        m.infer([x])  # warmup
         best, outs = float("inf"), None
         for _ in range(3):
             t0 = time.time()
@@ -338,10 +340,10 @@ for name in ALL_MODELS:
         m.close()
         print(f"      -> {best:6.1f} ms, Top-1: {LABELS[top5_i[0]]} "
               f"({p[top5_i[0]]*100:.1f}%)", flush=True)
-print("\\n全部完成 ✅", flush=True)
+print("\\nAll done ✅", flush=True)
 """),
         md("""
-### 对比表格
+### Comparison table
 """),
         code("""
 from IPython.display import HTML
@@ -351,11 +353,11 @@ rows = "".join(
     f"<td>{', '.join(f'{LABELS[i]}({pp*100:.1f}%)' for i, pp in list(zip(t, pr))[:5])}</td></tr>"
     for n, q, lat, t, pr in compare)
 HTML("<table style='text-align:left'>"
-     "<tr><th>模型</th><th>量化</th><th>耗时(ms)</th><th>Top-5（概率）</th></tr>"
+     "<tr><th>Model</th><th>Quant</th><th>Latency (ms)</th><th>Top-5 (prob)</th></tr>"
      + rows + "</table>")
 """),
         md("""
-### 耗时柱状图（i8 vs fp16）
+### Latency bar chart (i8 vs fp16)
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -374,15 +376,15 @@ for k, q in enumerate(QUANTS):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
                 f"{lat:.0f}ms\\n{top}", ha="center", va="bottom", fontsize=8)
 ax.set_xticks(xs, ALL_MODELS)
-ax.set_ylabel("推理耗时 (ms)")
-ax.set_title("分类模型对比（同一张图，i8 vs fp16）")
+ax.set_ylabel("inference latency (ms)")
+ax.set_title("Classification models (same image, i8 vs fp16)")
 ax.set_ylim(0, max(lat for _, _, lat, *_ in compare) * 1.35)
 ax.legend()
 plt.tight_layout()
 plt.show()
 """),
         md("""
-### Top-5 效果拼图
+### Top-5 mosaic
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -399,13 +401,15 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 小结
+## Summary
 
-- 完整流程：**下载模型 → 前处理 → NPU 推理 → 反量化/Softmax → Top-5**
-- 从第 6 步的对比可以看到：
-  - **mobilenet_v2**（轻量，3.4M 参数）明显比 **resnet50_v2**（经典，25M 参数）快；
-    ResNet50-v2 精度更高（ImageNet Top-1 约 72% vs 75.6%，论文值）。
-  - 同一模型的 i8 通常比 fp16 更快，Top-5 结果基本一致——量化带来的精度损失很小。
+- Full pipeline: **download -> pre-process -> NPU inference -> dequantize/Softmax -> Top-5**
+- What step 6 shows:
+  - **mobilenet_v2** (lightweight, 3.4M params) is clearly faster than
+    **resnet50_v2** (classic, 25M params); ResNet50-v2 is more accurate
+    (ImageNet Top-1 ~72% vs ~75.6%, paper figures).
+  - For the same model, i8 is usually faster than fp16 with nearly identical
+    Top-5 — quantization costs very little accuracy.
 """),
     ]
     return notebook(cells)
@@ -428,46 +432,47 @@ def build_02():
 
     cells = [
         md("""
-# RK1828 YOLO 目标检测 Demo（YOLOv5/v6/v8 + YOLO26）
+# RK1828 YOLO Object Detection Demo (YOLOv5/v6/v8 + YOLO26)
 
-一次跑通 6 个 YOLO 模型，理解两类输出格式：
+Run 6 YOLO models in one go and understand the two output formats:
 
-| 模型 | 输出 | 后处理 |
+| Model | Output | Post-processing |
 |---|---|---|
-| YOLOv5 / v6 / v8 | `[1,K,6]`（score, class, x1, y1, x2, y2） | 框解码 + NMS 已在模型内完成，只需坐标还原 |
-| YOLO26 (n/s/m) | 6 个原始检测头（stride 8/16/32 的 box + score） | host 端 sigmoid + 框解码 + 按类 NMS |
+| YOLOv5 / v6 / v8 | `[1,K,6]` (score, class, x1, y1, x2, y2) | decode + NMS baked into the model; only coordinate restore needed |
+| YOLO26 (n/s/m) | 6 raw heads (box + score at strides 8/16/32) | host-side sigmoid + box decode + per-class NMS |
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 选择模型和图片 |
-| 3 | 前处理（letterbox 等比缩放 + 灰边填充） |
-| 4 | RKNN 推理 |
-| 5 | 后处理与可视化 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Pick a model and an image |
+| 3 | Pre-processing (letterbox: aspect-preserving resize + gray pad) |
+| 4 | RKNN inference |
+| 5 | Post-processing and visualization |
 """),
         ENV_MD, ENV_CODE,
     ]
     cells += download_cells(
         files,
-        intro="本 demo 会下载 YOLOv5/v6/v8 和 YOLO26 n/s/m（各 i8/fp16 两版），"
-              "以及 COCO 80 类标签和示例图片。")
+        intro="This demo downloads YOLOv5/v6/v8 and YOLO26 n/s/m (i8 and fp16 each), "
+              "plus the COCO 80-class labels and sample images.")
     cells += [
         md("""
-## 2. 选择模型和图片
+## 2. Pick a model and an image
 
-模型文件在 `models/yolo/<名称>/<量化>/` 下；图片可以换成自己的。
+Model files live under `models/yolo/<name>/<quant>/`; feel free to use your own image.
 
-**各模型的实际规格**（从权重体积判定）：
+**Actual variant of each model** (judged from weight sizes):
 
-| 目录名 | 实际规格 | 参数量 | 备注 |
+| Directory | Actual variant | Params | Note |
 |---|---|---|---|
-| `yolov5` | **YOLOv5s** | 7.2M | i8/fp16 目录与内容一致 |
-| `yolov6` | **YOLOv6s** | 17.2M | ⚠️ `i8`/`fp16` 目录**疑似标反**（"i8"目录的权重更大且更慢，实测如此） |
-| `yolov8` | **YOLOv8s** | 11.2M | ⚠️ 同上，`i8`/`fp16` 目录**疑似标反** |
-| `yolo26n/s/m` | YOLO26n / 26s / 26m | 2.4M / 9.5M / 20.4M | 目录与内容一致 |
+| `yolov5` | **YOLOv5s** | 7.2M | i8/fp16 directories match their content |
+| `yolov6` | **YOLOv6s** | 17.2M | ⚠️ `i8`/`fp16` directories **appear swapped** (the "i8" dir has the larger, slower weights — measured) |
+| `yolov8` | **YOLOv8s** | 11.2M | ⚠️ same as above, `i8`/`fp16` **appear swapped** |
+| `yolo26n/s/m` | YOLO26n / 26s / 26m | 2.4M / 9.5M / 20.4M | directories match their content |
 
-> v6/v8 的目录问题来自瑞芯微官方 SDK 预转换包本身（i8 版本内嵌的 NMS
-> 后处理头以 fp16 存储，导致体积更大、速度更慢），选择时以实测为准。
+> The v6/v8 directory issue comes from the official Rockchip SDK conversion
+> package itself (the i8 build embeds an fp16 NMS post-processing head, making
+> it bigger and slower); trust the measurements, not the directory names.
 """),
         code("""
 import glob
@@ -476,20 +481,22 @@ from IPython.display import display
 
 w_model = widgets.Dropdown(
     options=["yolov5", "yolov6", "yolov8", "yolo26n", "yolo26s", "yolo26m"],
-    value="yolov8", description="模型:")
-w_quant = widgets.Dropdown(options=["i8", "fp16"], description="量化:")
+    value="yolov8", description="Model:")
+w_quant = widgets.Dropdown(options=["i8", "fp16"], description="Quant:")
 w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
-                           description="图片:", layout=widgets.Layout(width="60%"))
+                           description="Image:", layout=widgets.Layout(width="60%"))
 display(w_model, w_quant, w_image)
 
 LABELS = open("datasets/coco_80_labels_list.txt").read().splitlines()
-print(f"{len(LABELS)} 个 COCO 类别。选好后继续往下运行 ▼")
+print(f"{len(LABELS)} COCO classes. Then keep running downwards ▼")
 """),
         md("""
-## 3. 前处理：letterbox
+## 3. Pre-processing: letterbox
 
-YOLO 要求 640×640 正方形输入。直接拉伸会改变物体长宽比，所以**等比缩放后灰边填充**，
-并记下缩放比例和 padding —— 后处理时要用它们把框还原回原图坐标。
+YOLO expects a 640x640 square input. Stretching would distort aspect ratio, so
+we **resize proportionally and pad with gray**, remembering the scale and
+padding — the post-processing needs them to map boxes back to original
+coordinates.
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -501,14 +508,14 @@ setup_cjk_font()
 img = Image.open(w_image.value).convert("RGB")
 img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
 x = to_input_array(img_lb)
-print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+print(f"original {img.size} -> input {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
 
-# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+# show every pre-processing stage: original -> letterbox -> input tensor
 fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
 for ax, im, title in [
-    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
-    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
-    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+    (axes[0], img, f"1. original {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(aspect resize + gray pad)"),
+    (axes[2], x[0], f"3. model input {x.shape}\\nuint8 NHWC"),
 ]:
     ax.imshow(np.asarray(im))
     ax.set_title(title)
@@ -517,7 +524,7 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 4. RKNN 推理
+## 4. RKNN inference
 """),
         code("""
 import time
@@ -525,21 +532,23 @@ from rknn3 import Rknn3Model
 
 model_path = f"models/yolo/{w_model.value}/{w_quant.value}/{w_model.value}.rknn"
 model = Rknn3Model(model_path)
-print(f"{len(model.output_attrs)} 个输出:")
+print(f"{len(model.output_attrs)} outputs:")
 for a in model.output_attrs:
     print("  ", a)
 
 _ = model.infer([x])
 t0 = time.time()
 outputs = model.infer([x])
-print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+print(f"inference time: {(time.time()-t0)*1000:.1f} ms")
 """),
         md("""
-## 5. 后处理
+## 5. Post-processing
 
-- **YOLOv5/v6/v8**：输出已经是 NMS 后的 `(score, class, x1, y1, x2, y2)`，按置信度过滤即可
-- **YOLO26**：6 个检测头（3 个 box 头 `[1,4,h,w]` + 3 个 score 头 `[1,80,h,w]`），
-  在 host 端做 sigmoid、框解码和按类 NMS；i8 输出还要先反量化
+- **YOLOv5/v6/v8**: output is already post-NMS `(score, class, x1, y1, x2, y2)`;
+  just filter by confidence
+- **YOLO26**: 6 heads (3 box heads `[1,4,h,w]` + 3 score heads `[1,80,h,w]`);
+  sigmoid, box decode and per-class NMS run on the host; i8 outputs are
+  dequantized first
 """),
         code("""
 from vision_post import (decode_builtin_nms, decode_yolo26_heads,
@@ -552,12 +561,12 @@ else:
     boxes, classes, scores = decode_builtin_nms(outputs[0], conf_thresh=0.4)
 
 boxes = unletterbox_boxes(boxes, SCALE, PAD_X, PAD_Y, *img.size)
-print(f"检测到 {len(boxes)} 个目标:")
+print(f"{len(boxes)} objects detected:")
 for b, c, s in zip(boxes, classes, scores):
     print(f"  {LABELS[c]:12s} {s:.2f}  box=({b[0]:.0f},{b[1]:.0f},{b[2]:.0f},{b[3]:.0f})")
 """),
         md("""
-## 6. 可视化
+## 6. Visualization
 """),
         code("""
 from vision_post import draw_boxes
@@ -567,11 +576,12 @@ model.close()
 result
 """),
         md("""
-## 7. 多模型对比（i8 + fp16 全量）
+## 7. Multi-model comparison (i8 + fp16, full sweep)
 
-同一张图，把 **6 个模型 × 2 种量化（i8 / fp16）共 12 组**全部跑一遍。
-运行过程实时打印进度；全部完成后输出对比表格、耗时柱状图和检测效果拼图。
-每个模型计时 3 次取最快（排除首次预热抖动）。
+Same image, running **6 models x 2 quantizations (i8 / fp16) = 12 combos**.
+Progress is printed live; afterwards you get a comparison table, a latency
+bar chart, and a detection mosaic. Each model is timed 3 times and the best
+is kept (warm-up jitter excluded).
 """),
         code("""
 import time
@@ -579,8 +589,9 @@ from rknn3 import Rknn3Model
 from vision_post import (decode_builtin_nms, decode_yolo26_heads,
                          unletterbox_boxes)
 
-# 目录名 -> 实际规格: yolov5=YOLOv5s, yolov6=YOLOv6s, yolov8=YOLOv8s
-# 注意: yolov6/yolov8 的 i8 与 fp16 目录疑似标反（官方 SDK 包如此，见上文表格）
+# directory -> actual variant: yolov5=YOLOv5s, yolov6=YOLOv6s, yolov8=YOLOv8s
+# note: yolov6/yolov8 i8 and fp16 directories appear swapped (official SDK
+# package, see the table above)
 ALL_MODELS = ["yolov5", "yolov6", "yolov8", "yolo26n", "yolo26s", "yolo26m"]
 QUANTS = ["i8", "fp16"]
 
@@ -590,9 +601,9 @@ step = 0
 for name in ALL_MODELS:
     for quant in QUANTS:
         step += 1
-        print(f"[{step:2d}/{total}] 加载 {name} ({quant}) ...", flush=True)
+        print(f"[{step:2d}/{total}] loading {name} ({quant}) ...", flush=True)
         m = Rknn3Model(f"models/yolo/{name}/{quant}/{name}.rknn")
-        m.infer([x])  # 预热
+        m.infer([x])  # warmup
         best, outs = float("inf"), None
         for _ in range(3):
             t0 = time.time()
@@ -605,11 +616,11 @@ for name in ALL_MODELS:
         b = unletterbox_boxes(b, SCALE, PAD_X, PAD_Y, *img.size)
         compare.append((name, quant, best, b, c, s))
         m.close()
-        print(f"      -> {best:6.1f} ms, {len(b)} 个目标", flush=True)
-print("\\n全部完成 ✅", flush=True)
+        print(f"      -> {best:6.1f} ms, {len(b)} objects", flush=True)
+print("\\nAll done ✅", flush=True)
 """),
         md("""
-### 对比表格
+### Comparison table
 """),
         code("""
 from IPython.display import HTML
@@ -620,11 +631,11 @@ rows = "".join(
     f"<td>{', '.join(f'{LABELS[ci]}({si:.2f})' for ci, si in list(zip(c, s))[:5]) or '-'}</td></tr>"
     for n, q, lat, b, c, s in compare)
 HTML("<table style='text-align:left'>"
-     "<tr><th>模型</th><th>量化</th><th>耗时(ms)</th><th>目标数</th><th>Top-5 检测</th></tr>"
+     "<tr><th>Model</th><th>Quant</th><th>Latency (ms)</th><th>Objects</th><th>Top-5 detections</th></tr>"
      + rows + "</table>")
 """),
         md("""
-### 耗时柱状图（i8 vs fp16）
+### Latency bar chart (i8 vs fp16)
 """),
         code("""
 import numpy as np
@@ -642,17 +653,17 @@ for k, q in enumerate(QUANTS):
     bars = ax.bar(xs + (k - 0.5) * width, lats, width, label=q, color=colors[q])
     for bar, lat, cnt in zip(bars, lats, cnts):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                f"{lat:.0f}ms\\n{cnt}个", ha="center", va="bottom", fontsize=8)
+                f"{lat:.0f}ms\\n{cnt} obj", ha="center", va="bottom", fontsize=8)
 ax.set_xticks(xs, ALL_MODELS)
-ax.set_ylabel("推理耗时 (ms)")
-ax.set_title("YOLO 多模型对比（同一张图，i8 vs fp16）")
+ax.set_ylabel("inference latency (ms)")
+ax.set_title("YOLO multi-model comparison (same image, i8 vs fp16)")
 ax.set_ylim(0, max(lat for _, _, lat, *_ in compare) * 1.3)
 ax.legend()
 plt.tight_layout()
 plt.show()
 """),
         md("""
-### 检测效果拼图（上排 i8，下排 fp16）
+### Detection mosaic (top row i8, bottom row fp16)
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -663,23 +674,26 @@ for k, q in enumerate(QUANTS):
     row = [(n, lat, b, c, s) for n, qq, lat, b, c, s in compare if qq == q]
     for ax, (n, lat, b, c, s) in zip(axes[k], row):
         ax.imshow(draw_boxes(img, b, c, s, LABELS))
-        ax.set_title(f"{n} ({q})  {lat:.0f}ms  {len(b)}个", fontsize=10)
+        ax.set_title(f"{n} ({q})  {lat:.0f}ms  {len(b)} obj", fontsize=10)
         ax.axis("off")
 plt.tight_layout()
 plt.show()
 """),
         md("""
-## 小结
+## Summary
 
-- YOLOv5/v6/v8 把解码和 NMS 做进了模型，host 端几乎零后处理；
-  YOLO26 输出原始检测头换取部署灵活性，后处理在 host 完成（见 `vision_post.decode_yolo26_heads`）。
-- 一般规律：i8 比 fp16 快，模型越大越慢但检测更全；
-  官方参考 mAP@0.5:0.95: 26n 40.9 / 26s 48.6 / 26m 53.1（PyTorch FP32）。
-- 模型规格：v5/v6/v8 是瑞芯微官方 SDK 的预转换模型，按家族名发布。
-  从权重体积判定均为 **s 规格**：`yolov5`=YOLOv5s（7.2M 参数）、`yolov6`=YOLOv6s（17.2M）、
-  `yolov8`=YOLOv8s（11.2M），**都不是 n 规格**。
-  且 v6/v8 的 `i8`/`fp16` 目录疑似标反（"i8"目录权重更大、实测更慢），
-  原因是 i8 版本内嵌的 NMS 后处理头以 fp16 存储；选量化版本时以实测为准。
+- YOLOv5/v6/v8 bake decode + NMS into the model, so the host does almost no
+  post-processing; YOLO26 emits raw heads for deployment flexibility, with
+  post-processing on the host (see `vision_post.decode_yolo26_heads`).
+- General rule: i8 beats fp16; bigger models are slower but detect more;
+  official reference mAP@0.5:0.95: 26n 40.9 / 26s 48.6 / 26m 53.1 (PyTorch FP32).
+- Variants: v5/v6/v8 are the official Rockchip SDK pre-converted models,
+  released by family name. Judging by weight size they are all **s variants**:
+  `yolov5`=YOLOv5s (7.2M params), `yolov6`=YOLOv6s (17.2M),
+  `yolov8`=YOLOv8s (11.2M) — **none of them is an n variant**.
+  Also the v6/v8 `i8`/`fp16` directories appear swapped (the "i8" dir has the
+  larger, slower weights), because the i8 build embeds an fp16 NMS head;
+  trust measurements when picking a quantization.
 """),
     ]
     return notebook(cells)
@@ -696,34 +710,35 @@ def build_03():
     ]
     cells = [
         md("""
-# RK1828 FastSAM-s 实例分割 Demo
+# RK1828 FastSAM-s Instance Segmentation Demo
 
-[FastSAM](https://github.com/CASIA-IVA-Lab/FastSAM)（中科院自动化所）是基于 YOLOv8-seg 的
-**可提示实例分割**模型。本 demo 用 "segment everything" 模式：一次前向找出图中所有物体并给出掩码。
+[FastSAM](https://github.com/CASIA-IVA-Lab/FastSAM) (CASIA) is a YOLOv8-seg-based
+**promptable instance segmentation** model. This demo uses the "segment
+everything" mode: one forward pass finds every object and its mask.
 
-模型两个输出：
+The model has two outputs:
 
-| 输出 | 形状 | 含义 |
+| Output | Shape | Meaning |
 |---|---|---|
-| `output0` | `[1,37,8400]` | cx, cy, w, h, 置信度 + 32 个 mask 系数（已解码） |
-| `output1` | `[1,32,160,160]` | mask prototypes（掩码基） |
+| `output0` | `[1,37,8400]` | cx, cy, w, h, confidence + 32 mask coefficients (decoded) |
+| `output1` | `[1,32,160,160]` | mask prototypes |
 
-后处理：置信度过滤 → NMS → `sigmoid(系数 @ prototypes)` 得到每个物体的掩码。
+Post-processing: confidence filter -> NMS -> `sigmoid(coeffs @ prototypes)`.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 选择图片 |
-| 3 | 前处理（letterbox） |
-| 4 | RKNN 推理 |
-| 5 | 后处理（NMS + 掩码合成）与可视化 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Pick an image |
+| 3 | Pre-processing (letterbox) |
+| 4 | RKNN inference |
+| 5 | Post-processing (NMS + mask assembly) and visualization |
 """),
         ENV_MD, ENV_CODE,
     ]
-    cells += download_cells(files, intro="本 demo 下载 FastSAM-s 模型和示例图片。")
+    cells += download_cells(files, intro="This demo downloads the FastSAM-s model and sample images.")
     cells += [
         md("""
-## 2. 选择图片
+## 2. Pick an image
 """),
         code("""
 import glob
@@ -731,14 +746,14 @@ import ipywidgets as widgets
 from IPython.display import display
 
 w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
-                           description="图片:", layout=widgets.Layout(width="60%"))
+                           description="Image:", layout=widgets.Layout(width="60%"))
 w_conf = widgets.FloatSlider(value=0.5, min=0.1, max=0.9, step=0.05,
-                             description="置信度:", style={"description_width": "80px"})
+                             description="Conf:", style={"description_width": "80px"})
 display(w_image, w_conf)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         md("""
-## 3. 前处理：letterbox
+## 3. Pre-processing: letterbox
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -750,14 +765,14 @@ setup_cjk_font()
 img = Image.open(w_image.value).convert("RGB")
 img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
 x = to_input_array(img_lb)
-print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+print(f"original {img.size} -> input {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
 
-# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+# show every pre-processing stage: original -> letterbox -> input tensor
 fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
 for ax, im, title in [
-    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
-    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
-    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+    (axes[0], img, f"1. original {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(aspect resize + gray pad)"),
+    (axes[2], x[0], f"3. model input {x.shape}\\nuint8 NHWC"),
 ]:
     ax.imshow(np.asarray(im))
     ax.set_title(title)
@@ -766,25 +781,26 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 4. RKNN 推理
+## 4. RKNN inference
 """),
         code("""
 import time
 from rknn3 import Rknn3Model
 
 model = Rknn3Model("models/fastsam/fastsam_s.rknn")
-print("输出:", model.output_attrs)
+print("outputs:", model.output_attrs)
 
 _ = model.infer([x])
 t0 = time.time()
 outputs = model.infer([x])
-print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+print(f"inference time: {(time.time()-t0)*1000:.1f} ms")
 """),
         md("""
-## 5. 后处理：NMS + 掩码合成
+## 5. Post-processing: NMS + mask assembly
 
-`sigmoid(mask系数 @ prototypes)` 得到 160×160 掩码，放大到输入尺寸、按框裁剪，
-再映射回原图；过滤掉过小（面积占比 < 0.2%）的碎片掩码。
+`sigmoid(coeffs @ prototypes)` yields 160x160 masks; upscale to input size,
+crop by box, then map back to the original image. Fragment masks smaller
+than 0.2% of the image are dropped.
 """),
         code("""
 import numpy as np
@@ -797,10 +813,10 @@ boxes = unletterbox_boxes(boxes, SCALE, PAD_X, PAD_Y, *img.size)
 ratio = (masks_full > 0.5).mean(axis=(1, 2))
 keep = ratio > 0.002
 boxes, scores, masks_full = boxes[keep], scores[keep], masks_full[keep]
-print(f"共 {len(boxes)} 个物体（过滤碎片后）")
+print(f"{len(boxes)} objects (after fragment filtering)")
 """),
         md("""
-## 6. 可视化
+## 6. Visualization
 """),
         code("""
 from vision_post import draw_boxes, draw_masks
@@ -811,61 +827,18 @@ model.close()
 result
 """),
         md("""
-## 小结
+## Summary
 
-- FastSAM 是**类别无关**的：只输出"是不是物体"和掩码，不分类别。
-- 掩码 = `sigmoid(32 个系数 × 32 通道 prototypes)`，这是 YOLOv8-seg 系列的通用做法。
+- FastSAM is **class-agnostic**: it only tells "is this an object" plus the
+  mask, with no class label.
+- Mask = `sigmoid(32 coefficients x 32-channel prototypes)` — the standard
+  approach of the YOLOv8-seg family.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ C++ demo 公共
-
-ASR_WAVS = [
-    ("whisper-base-rknn3-rk1828", "model/test_zh.wav", "datasets/asr/test_zh.wav"),
-    ("whisper-base-rknn3-rk1828", "model/test_en.wav", "datasets/asr/test_en.wav"),
-    ("whisper-base-rknn3-rk1828", "model/long_en.wav", "datasets/asr/long_en.wav"),
-    ("sensevoice-small-rknn3-rk1828", "model/zh.wav", "datasets/asr/sensevoice_zh.wav"),
-    ("paraformer-rknn3-rk1828", "model/asr_example.wav", "datasets/asr/asr_example.wav"),
-    ("paraformer-rknn3-rk1828", "model/asr_example_hotword.wav",
-     "datasets/asr/asr_example_hotword.wav"),
-    ("qwen3-forced-aligner-rknn3-rk1828", "audio.wav", "datasets/asr/aligner_demo.wav"),
-]
-
-def wav_dropdown(default=None):
-    """ASR 类 notebook 的音频选择单元格；default 为优先选中的文件名。"""
-    val = ""
-    if default:
-        val = (f"\nif any(o.endswith('/{default}') for o in w_wav.options):\n"
-               f"    w_wav.value = [o for o in w_wav.options "
-               f"if o.endswith('/{default}')][0]\n")
-    return code(f"""
-import glob
-import ipywidgets as widgets
-from IPython.display import display
-
-w_wav = widgets.Dropdown(options=sorted(glob.glob("datasets/asr/*.wav")),
-                         description="音频:", layout=widgets.Layout(width="60%"))
-display(w_wav){val}print("选好后继续往下运行 ▼")
-""")
-
-AUDIO_PLAY_MD = md("""
-先听一下这段音频：
-""")
-
-AUDIO_PLAY_CODE = code("""
-from nb_demo import show_audio
-
-show_audio(w_wav.value)
-""")
-
-
-def cpp_intro(title, body):
-    return md(f"# {title}\n\n{body}")
-
-
-# ================================================================ 04 YOLO26 姿态
+# ================================================================ 04 YOLO26 pose
 
 def build_04():
     repo = "yolo26-pose-rknn3-rk1828"
@@ -879,38 +852,41 @@ def build_04():
 
     cells = [
         md("""
-# RK1828 YOLO26-pose 人体姿态估计 Demo
+# RK1828 YOLO26-pose Human Pose Estimation Demo
 
-Ultralytics **YOLO26-pose**：检测人体并回归 **17 个关键点**（鼻/眼/耳/肩/肘/腕/髋/膝/踝）。
-端到端无 NMS 设计（host 端仍做一次轻量 NMS 去重），9 个输出头：
+Ultralytics **YOLO26-pose**: detects people and regresses **17 keypoints**
+(nose/eyes/ears/shoulders/elbows/wrists/hips/knees/ankles). End-to-end
+NMS-free design (we still run a light NMS on the host for dedup), 9 output
+heads:
 
-| 输出头 | 形状（stride 8/16/32 各一组） | 含义 |
+| Head | Shape (one set per stride 8/16/32) | Meaning |
 |---|---|---|
-| `box_*` | `[1,4,80,80]` `[1,4,40,40]` `[1,4,20,20]` | 框回归 (l,t,r,b)，无 DFL |
-| `score_*` | `[1,1,…]` | 人体置信度（单类别 person） |
-| `pos_*` | `[1,51,…]` | 17 关键点 × 3（x, y, 置信度 logit） |
+| `box_*` | `[1,4,80,80]` `[1,4,40,40]` `[1,4,20,20]` | box regression (l,t,r,b), no DFL |
+| `score_*` | `[1,1,...]` | person confidence (single class) |
+| `pos_*` | `[1,51,...]` | 17 keypoints x 3 (x, y, confidence logit) |
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 选择模型和图片 |
-| 3 | 前处理（letterbox 等比缩放 + 灰边填充） |
-| 4 | RKNN 推理 |
-| 5 | 后处理（框 + 关键点解码 + NMS） |
-| 6 | 骨架可视化 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Pick a model and an image |
+| 3 | Pre-processing (letterbox: aspect resize + gray pad) |
+| 4 | RKNN inference |
+| 5 | Post-processing (box + keypoint decode + NMS) |
+| 6 | Skeleton visualization |
 
-> 规格说明：**n/s 有 i8 和 fp16 两版；m 只有 i8**——官方 SDK 包里的
-> m-pose fp16 权重文件损坏（实为 .rknn 的副本），未收录。
-> 参考成绩：yolo26m-pose i8 约 158ms/帧，示例图人体置信度 0.93。
+> Variants: **n/s come in i8 and fp16; m only ships i8** — the m-pose fp16
+> weight in the official SDK package is corrupted (a byte-copy of the .rknn
+> file), so it is not included.
+> Reference: yolo26m-pose i8 ~158 ms/frame, person confidence 0.93 on the sample.
 """),
         ENV_MD, ENV_CODE,
     ]
     cells += download_cells(
         files,
-        intro="本 demo 下载 YOLO26-pose n/s/m 模型（m 仅 i8）和示例图 little_boy.jpg。")
+        intro="This demo downloads YOLO26-pose n/s/m (m is i8-only) and the sample little_boy.jpg.")
     cells += [
         md("""
-## 2. 选择模型和图片
+## 2. Pick a model and an image
 """),
         code("""
 import glob
@@ -922,20 +898,21 @@ w_model = widgets.Dropdown(
              ("yolo26n-pose fp16", "yolo26n-pose_fp16"),
              ("yolo26s-pose i8", "yolo26s-pose_i8"),
              ("yolo26s-pose fp16", "yolo26s-pose_fp16"),
-             ("yolo26m-pose i8（仅此版）", "yolo26m-pose_i8")],
-    value="yolo26m-pose_i8", description="模型:")
+             ("yolo26m-pose i8 (only this one)", "yolo26m-pose_i8")],
+    value="yolo26m-pose_i8", description="Model:")
 w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
-                           description="图片:", layout=widgets.Layout(width="60%"))
+                           description="Image:", layout=widgets.Layout(width="60%"))
 if any(o.endswith("/little_boy.jpg") for o in w_image.options):
     w_image.value = [o for o in w_image.options if o.endswith("/little_boy.jpg")][0]
 display(w_model, w_image)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         md("""
-## 3. 前处理：letterbox
+## 3. Pre-processing: letterbox
 
-YOLO 要求 640×640 正方形输入。直接拉伸会改变人体比例，所以**等比缩放后灰边填充**，
-并记下缩放比例和 padding —— 后处理时要用它们把框和关键点还原回原图坐标。
+YOLO expects a 640x640 square input. Stretching would distort body proportions,
+so we **resize proportionally and pad with gray**, remembering the scale and
+padding — the post-processing needs them to map boxes and keypoints back.
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -947,14 +924,14 @@ setup_cjk_font()
 img = Image.open(w_image.value).convert("RGB")
 img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
 x = to_input_array(img_lb)
-print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+print(f"original {img.size} -> input {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
 
-# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+# show every pre-processing stage: original -> letterbox -> input tensor
 fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
 for ax, im, title in [
-    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
-    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
-    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+    (axes[0], img, f"1. original {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(aspect resize + gray pad)"),
+    (axes[2], x[0], f"3. model input {x.shape}\\nuint8 NHWC"),
 ]:
     ax.imshow(np.asarray(im))
     ax.set_title(title)
@@ -963,28 +940,30 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 4. RKNN 推理
+## 4. RKNN inference
 """),
         code("""
 import time
 from rknn3 import Rknn3Model
 
 model = Rknn3Model(f"models/yolo26_pose/{w_model.value}.rknn")
-print(f"{len(model.output_attrs)} 个输出头:")
+print(f"{len(model.output_attrs)} output heads:")
 for a in model.output_attrs:
     print("  ", a)
 
 _ = model.infer([x])
 t0 = time.time()
 outputs = model.infer([x])
-print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+print(f"inference time: {(time.time()-t0)*1000:.1f} ms")
 """),
         md("""
-## 5. 后处理：框 + 关键点解码
+## 5. Post-processing: box + keypoint decode
 
-- 每个网格：box 头给出 (l,t,r,b) 距离，score 头给出人体置信度
-- 关键点：`x = (raw_x + 网格x + 0.5) × stride`，置信度再过 sigmoid
-- 全部网格收集后做一次 NMS，再把坐标从 letterbox 系还原回原图
+- Each grid cell: the box head gives (l,t,r,b) distances, the score head the
+  person confidence
+- Keypoints: `x = (raw_x + grid_x + 0.5) * stride`; confidence goes through sigmoid
+- Collect all cells, run one NMS, then map coordinates from letterbox space
+  back to the original image
 """),
         code("""
 from vision_post import (decode_yolo26_pose, unletterbox_boxes,
@@ -995,16 +974,17 @@ boxes, scores, keypoints = decode_yolo26_pose(outputs, model.output_attrs,
 boxes = unletterbox_boxes(boxes, SCALE, PAD_X, PAD_Y, *img.size)
 keypoints = unletterbox_keypoints(keypoints, SCALE, PAD_X, PAD_Y)
 
-print(f"检测到 {len(boxes)} 个人:")
+print(f"{len(boxes)} person(s) detected:")
 for b, s, k in zip(boxes, scores, keypoints):
     vis = (k[:, 2] >= 0.5).sum()
     print(f"  person {s:.2f}  box=({b[0]:.0f},{b[1]:.0f},{b[2]:.0f},{b[3]:.0f})"
-          f"  可见关键点 {vis}/17")
+          f"  visible keypoints {vis}/17")
 """),
         md("""
-## 6. 骨架可视化
+## 6. Skeleton visualization
 
-COCO 17 关键点按骨架连线（肩-肘-腕、髋-膝-踝等），白点 = 置信度 ≥ 0.5 的关键点。
+COCO 17 keypoints connected by the skeleton (shoulder-elbow-wrist,
+hip-knee-ankle, etc.); white dots = keypoints with confidence >= 0.5.
 """),
         code("""
 from vision_post import draw_pose
@@ -1014,19 +994,19 @@ model.close()
 result
 """),
         md("""
-## 小结
+## Summary
 
-- YOLO26-pose 的关键点和框在同一个前向里输出（`pos_*` 头 51 通道 = 17 点 × 3），
-  不需要单独的 pose 模型二次推理。
-- 解码逻辑在 `vision_post.decode_yolo26_pose` / `unletterbox_keypoints`，
-  画图在 `vision_post.draw_pose`（`COCO_SKELETON` 定义了 17 条骨架连线）。
-- 可以换 n/s 规格对比速度，或换多人照片看骨架串联效果。
+- YOLO26-pose outputs keypoints and boxes in the same forward pass (the
+  `pos_*` head's 51 channels = 17 points x 3) — no second pose model needed.
+- Decode lives in `vision_post.decode_yolo26_pose` / `unletterbox_keypoints`,
+  drawing in `vision_post.draw_pose` (`COCO_SKELETON` defines the 17 bones).
+- Try n/s for speed, or a multi-person photo to see the skeletons.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 05 YOLO26 分割
+# ================================================================ 05 YOLO26 segmentation
 
 def build_05():
     repo = "yolo26-segment-rknn3-rk1828"
@@ -1042,39 +1022,41 @@ def build_05():
 
     cells = [
         md("""
-# RK1828 YOLO26-seg 实例分割 Demo
+# RK1828 YOLO26-seg Instance Segmentation Demo
 
-Ultralytics **YOLO26-seg**：检测框 + 80 类分类 + **像素级实例掩码**，10 个输出头：
+Ultralytics **YOLO26-seg**: detection boxes + 80-class scores + **per-instance
+pixel masks**, 10 output heads:
 
-| 输出头 | 形状 | 含义 |
+| Head | Shape | Meaning |
 |---|---|---|
-| `box_*` ×3 | `[1,4,80,80]` `[1,4,40,40]` `[1,4,20,20]` | 框回归 (l,t,r,b) |
-| `score_*` ×3 | `[1,80,…]` | 80 类置信度 |
-| `mask 系数` ×3 | `[1,32,…]` | 每个候选的 32 维掩码系数 |
-| `proto` | `[1,32,160,160]` | 掩码基（prototypes） |
+| `box_*` x3 | `[1,4,80,80]` `[1,4,40,40]` `[1,4,20,20]` | box regression (l,t,r,b) |
+| `score_*` x3 | `[1,80,...]` | 80-class confidence |
+| mask coeffs x3 | `[1,32,...]` | 32-dim mask coefficients per candidate |
+| `proto` | `[1,32,160,160]` | mask prototypes |
 
-实例掩码 = `sigmoid(32 维系数 · proto)`，再按检测框裁剪、还原到原图。
-（和 03 FastSAM 同一套思路，只是多了 80 类分类。）
+Instance mask = `sigmoid(32-dim coeffs . proto)`, cropped by its box and
+mapped back to the original image. (Same idea as FastSAM in notebook 03,
+plus 80 classes.)
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 选择模型和图片 |
-| 3 | 前处理（letterbox 等比缩放 + 灰边填充） |
-| 4 | RKNN 推理 |
-| 5 | 后处理（解码 + NMS + 掩码合成） |
-| 6 | 可视化 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Pick a model and an image |
+| 3 | Pre-processing (letterbox: aspect resize + gray pad) |
+| 4 | RKNN inference |
+| 5 | Post-processing (decode + NMS + mask assembly) |
+| 6 | Visualization |
 
-> 参考成绩：yolo26m-seg i8 约 250ms/帧，示例图检出 4 个人 + 1 辆巴士。
+> Reference: yolo26m-seg i8 ~250 ms/frame, 4 persons + 1 bus on the sample.
 """),
         ENV_MD, ENV_CODE,
     ]
     cells += download_cells(
         files,
-        intro="本 demo 下载 YOLO26-seg n/s/m（各 i8/fp16 两版）、COCO 标签和示例图 bus.jpg。")
+        intro="This demo downloads YOLO26-seg n/s/m (i8 and fp16 each), the COCO labels and bus.jpg.")
     cells += [
         md("""
-## 2. 选择模型和图片
+## 2. Pick a model and an image
 """),
         code("""
 import glob
@@ -1083,20 +1065,21 @@ from IPython.display import display
 
 w_model = widgets.Dropdown(
     options=[f"yolo26{m}-seg_{q}" for m in ("n", "s", "m") for q in ("i8", "fp16")],
-    value="yolo26m-seg_i8", description="模型:")
+    value="yolo26m-seg_i8", description="Model:")
 w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
-                           description="图片:", layout=widgets.Layout(width="60%"))
+                           description="Image:", layout=widgets.Layout(width="60%"))
 if any(o.endswith("/bus.jpg") for o in w_image.options):
     w_image.value = [o for o in w_image.options if o.endswith("/bus.jpg")][0]
 display(w_model, w_image)
 
 LABELS = open("datasets/coco_80_labels_list.txt").read().splitlines()
-print(f"{len(LABELS)} 个 COCO 类别。选好后继续往下运行 ▼")
+print(f"{len(LABELS)} COCO classes. Then keep running downwards ▼")
 """),
         md("""
-## 3. 前处理：letterbox
+## 3. Pre-processing: letterbox
 
-等比缩放 + 灰边填充到 640×640，记下缩放比例和 padding 供坐标还原。
+Aspect-preserving resize + gray padding to 640x640, remembering the scale and
+padding for coordinate restore.
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -1108,14 +1091,14 @@ setup_cjk_font()
 img = Image.open(w_image.value).convert("RGB")
 img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
 x = to_input_array(img_lb)
-print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+print(f"original {img.size} -> input {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
 
-# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+# show every pre-processing stage: original -> letterbox -> input tensor
 fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
 for ax, im, title in [
-    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
-    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
-    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+    (axes[0], img, f"1. original {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(aspect resize + gray pad)"),
+    (axes[2], x[0], f"3. model input {x.shape}\\nuint8 NHWC"),
 ]:
     ax.imshow(np.asarray(im))
     ax.set_title(title)
@@ -1124,28 +1107,30 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 4. RKNN 推理
+## 4. RKNN inference
 """),
         code("""
 import time
 from rknn3 import Rknn3Model
 
 model = Rknn3Model(f"models/yolo26_seg/{w_model.value}.rknn")
-print(f"{len(model.output_attrs)} 个输出头:")
+print(f"{len(model.output_attrs)} output heads:")
 for a in model.output_attrs:
     print("  ", a)
 
 _ = model.infer([x])
 t0 = time.time()
 outputs = model.infer([x])
-print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+print(f"inference time: {(time.time()-t0)*1000:.1f} ms")
 """),
         md("""
-## 5. 后处理：解码 + NMS + 掩码合成
+## 5. Post-processing: decode + NMS + mask assembly
 
-1. 每个网格解码框和 80 类置信度，收集该网格的 32 维掩码系数
-2. 按类 NMS 去重
-3. `sigmoid(系数 · proto)` 得到 160×160 掩码 → 放大到输入尺寸、按框裁剪 → 还原回原图
+1. Per grid cell: decode the box and 80-class scores, keep the cell's 32-dim
+   mask coefficients
+2. Per-class NMS for dedup
+3. `sigmoid(coeffs . proto)` -> 160x160 masks -> upscale to input size, crop
+   by box -> map back to the original image
 """),
         code("""
 from vision_post import (decode_yolo26_seg, scale_masks, unletterbox_boxes)
@@ -1155,12 +1140,12 @@ boxes, classes, scores, masks = decode_yolo26_seg(outputs, model.output_attrs,
 masks_full = scale_masks(masks, boxes, (img.height, img.width), SCALE, PAD_X, PAD_Y)
 boxes = unletterbox_boxes(boxes, SCALE, PAD_X, PAD_Y, *img.size)
 
-print(f"检测到 {len(boxes)} 个目标:")
+print(f"{len(boxes)} objects detected:")
 for b, c, s in zip(boxes, classes, scores):
     print(f"  {LABELS[c]:12s} {s:.2f}  box=({b[0]:.0f},{b[1]:.0f},{b[2]:.0f},{b[3]:.0f})")
 """),
         md("""
-## 6. 可视化：掩码叠加 + 检测框
+## 6. Visualization: mask overlay + boxes
 """),
         code("""
 from vision_post import draw_boxes, draw_masks
@@ -1171,34 +1156,81 @@ model.close()
 result
 """),
         md("""
-## 小结
+## Summary
 
-- 掩码合成 `sigmoid(系数 · proto)` 是 YOLOv8-seg / FastSAM / YOLO26-seg 的通用做法，
-  proto 只需算一次，所有实例共享。
-- 解码在 `vision_post.decode_yolo26_seg`，掩码映射在 `vision_post.scale_masks`。
-- 与 03 FastSAM 对比：FastSAM 类别无关（segment everything），YOLO26-seg 输出 80 类。
+- `sigmoid(coeffs . proto)` mask assembly is the shared recipe of YOLOv8-seg /
+  FastSAM / YOLO26-seg; proto is computed once and shared by all instances.
+- Decode lives in `vision_post.decode_yolo26_seg`, mask mapping in
+  `vision_post.scale_masks`.
+- Compared with 03 FastSAM: FastSAM is class-agnostic (segment everything),
+  YOLO26-seg outputs 80 classes.
 """),
     ]
     return notebook(cells)
 
 
+# ================================================================ C++ demo shared
 
-# ================================================================ 06 RAFT 双目
+ASR_WAVS = [
+    ("whisper-base-rknn3-rk1828", "model/test_zh.wav", "datasets/asr/test_zh.wav"),
+    ("whisper-base-rknn3-rk1828", "model/test_en.wav", "datasets/asr/test_en.wav"),
+    ("whisper-base-rknn3-rk1828", "model/long_en.wav", "datasets/asr/long_en.wav"),
+    ("sensevoice-small-rknn3-rk1828", "model/zh.wav", "datasets/asr/sensevoice_zh.wav"),
+    ("paraformer-rknn3-rk1828", "model/asr_example.wav", "datasets/asr/asr_example.wav"),
+    ("paraformer-rknn3-rk1828", "model/asr_example_hotword.wav",
+     "datasets/asr/asr_example_hotword.wav"),
+    ("qwen3-forced-aligner-rknn3-rk1828", "audio.wav", "datasets/asr/aligner_demo.wav"),
+]
+
+def wav_dropdown(default=None):
+    """Audio picker cell for the ASR notebooks; `default` pre-selects a file name."""
+    val = ""
+    if default:
+        val = (f"\nif any(o.endswith('/{default}') for o in w_wav.options):\n"
+               f"    w_wav.value = [o for o in w_wav.options "
+               f"if o.endswith('/{default}')][0]\n")
+    return code(f"""
+import glob
+import ipywidgets as widgets
+from IPython.display import display
+
+w_wav = widgets.Dropdown(options=sorted(glob.glob("datasets/asr/*.wav")),
+                         description="Audio:", layout=widgets.Layout(width="60%"))
+display(w_wav){val}print("Then keep running downwards ▼")
+""")
+
+AUDIO_PLAY_MD = md("""
+Listen to the audio first:
+""")
+
+AUDIO_PLAY_CODE = code("""
+from nb_demo import show_audio
+
+show_audio(w_wav.value)
+""")
+
+
+def cpp_intro(title, body):
+    return md(f"# {title}\n\n{body}")
+
+
+# ================================================================ 06 RAFT stereo
 
 def build_06():
     files = repo_files("raft-stereo-rknn3-rk1828", "demos/raft_stereo")
     cells = [
-        cpp_intro("RK1828 RAFT-Stereo 双目视差 Demo",
+        cpp_intro("RK1828 RAFT-Stereo Disparity Demo",
                   """
-[RAFT-Stereo](https://github.com/princeton-vl/RAFT-Stereo)（普林斯顿视觉与学习实验室）
-从一对左右目图片估计**视差图**（disparity）：越亮表示越近。
-这里用的是 realtime 版本，输入 160×240，int8 量化，RK1828 上约 90ms/对。
+[RAFT-Stereo](https://github.com/princeton-vl/RAFT-Stereo) (Princeton Vision &
+Learning Lab) estimates a **disparity map** from a stereo pair: brighter means
+closer. This is the realtime variant, 160x240 input, int8 quantized, about
+90 ms/pair on the RK1828.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 运行并查看视差图 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Run and view the disparity map |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1207,10 +1239,10 @@ def build_06():
     cells += [
         run_helper_code(),
         md("""
-## 3. 运行 demo
+## 3. Run the demo
 
-输入：`model/xt_left.jpg` / `model/xt_right.jpg`（一对示例双目图）
-输出：`out.png` 视差热力图
+Input: `model/xt_left.jpg` / `model/xt_right.jpg` (a sample stereo pair)
+Output: `out.png` disparity heatmap
 """),
         code("""
 show_images(["demos/raft_stereo/model/xt_left.jpg",
@@ -1226,32 +1258,34 @@ run_demo(["./rknn_raft_stereo_demo",
 show_new_images(DEMO, before)
 """),
         md("""
-## 小结
+## Summary
 
-- 视差 = 同一物体在左右图中的水平位移，视差越大距离越近，是双目深度估计的核心。
-- 可换成自己的双目照片（保持 160×240 或由 demo 内部缩放）。
+- Disparity = horizontal shift of the same point between left and right
+  images; larger disparity means closer. It is the core of stereo depth.
+- Try your own stereo photos (keep 160x240, or let the demo scale them).
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 07 DA3 深度
+# ================================================================ 07 DA3 depth
 
 def build_07():
     files = repo_files("depth-anything-v3-rknn3-rk1828", "demos/depth_anything_v3")
     cells = [
-        cpp_intro("RK1828 Depth Anything V3 多视角深度估计 Demo",
+        cpp_intro("RK1828 Depth Anything V3 Multi-view Depth Demo",
                   """
-[Depth Anything V3](https://github.com/ByteDance-Seed/depth-anything-3)（字节跳动）
-多视角深度估计。模型被拆成三个子模型（local / global / head），固定输入 **10 个视角**，
-输出每个视角的深度热力图。RK1828 上 10 视角合计约 12 秒。
+[Depth Anything V3](https://github.com/ByteDance-Seed/depth-anything-3)
+(ByteDance) multi-view depth estimation. The model is split into three
+sub-models (local / global / head) with a fixed input of **10 views**, producing
+one depth heatmap per view. About 12 s for all 10 views on the RK1828.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型和 10 张示例图（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 准备图片列表并运行 |
-| 4 | 查看深度图 |
+| 1 | Download models and the 10 sample frames (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Build the image list and run |
+| 4 | View the depth maps |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1260,21 +1294,21 @@ def build_07():
     cells += [
         run_helper_code(),
         md("""
-## 3. 准备 10 视角图片列表并运行
+## 3. Build the 10-view image list and run
 
-仓库自带同一场景的 10 张示例图（`model/frame_01.jpg` ~ `frame_10.jpg`），
-demo 需要一个恰好 10 行的图片路径列表文件。
+The repo ships 10 sample frames of the same scene (`model/frame_01.jpg` ~
+`frame_10.jpg`); the demo wants a list file with exactly 10 image paths.
 """),
         code("""
 import glob, os
 
 DEMO = "demos/depth_anything_v3"
 frames = sorted(glob.glob(os.path.join(DEMO, "model/frame_*.jpg")))
-assert len(frames) == 10, f"需要恰好 10 张图，当前 {len(frames)} 张"
+assert len(frames) == 10, f"need exactly 10 frames, got {len(frames)}"
 with open(os.path.join(DEMO, "image_list.txt"), "w") as f:
-    f.write("\\n".join(os.path.abspath(p) for p in frames))  # demo 要求绝对路径
+    f.write("\\n".join(os.path.abspath(p) for p in frames))  # demo needs absolute paths
 show_images(frames[:5], max_width=320)
-print(f"共 {len(frames)} 张，列表已写入 image_list.txt")
+print(f"{len(frames)} frames, list written to image_list.txt")
 """),
         code("""
 run_demo(["./rknn_da3_base_demo",
@@ -1283,41 +1317,44 @@ run_demo(["./rknn_da3_base_demo",
           "image_list.txt", "10", "depth_vis"], DEMO)
 """),
         md("""
-## 4. 查看深度热力图（越亮越近）
+## 4. View the depth heatmaps (brighter = closer)
 """),
         code("""
 import glob
 
 depth_imgs = sorted(glob.glob(os.path.join(DEMO, "depth_vis/*")))
-print(f"生成 {len(depth_imgs)} 张深度图")
+print(f"{len(depth_imgs)} depth maps generated")
 show_images(depth_imgs[:5], max_width=320)
 """),
         md("""
-## 小结
+## Summary
 
-- 大模型可以拆成多个子模型分别转换、流水线运行，这是 RKNN 部署超大模型的常见手段。
-- 换自己的照片时注意：必须恰好 10 个视角，且尽量是同一场景不同角度。
+- Splitting a big model into sub-models, converted and pipelined separately,
+  is the standard RKNN approach for very large models.
+- With your own photos: exactly 10 views, ideally the same scene from
+  different angles.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 07 Chinese-CLIP
+# ================================================================ 08 Chinese-CLIP
 
 def build_08():
     files = repo_files("chinese-clip-rknn3-rk1828", "demos/chinese_clip")
     cells = [
-        cpp_intro("RK1828 Chinese-CLIP 图文匹配 Demo",
+        cpp_intro("RK1828 Chinese-CLIP Image-Text Matching Demo",
                   """
-[Chinese-CLIP](https://github.com/OFA-Sys/Chinese-CLIP)（达摩院）中文图文匹配：
-给定一张图和几条中文候选描述，计算匹配概率。文本编码器和视觉编码器分别转换、
-全部跑在 RK1828 上。示例图上正确描述的得分约 0.96 vs 0.04。
+[Chinese-CLIP](https://github.com/OFA-Sys/Chinese-CLIP) (DAMO Academy) matches
+an image against several Chinese text candidates and scores them. The text and
+vision encoders are converted separately and both run on the RK1828. On the
+sample, the correct caption scores ~0.96 vs ~0.04.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 运行图文匹配 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Run image-text matching |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1326,9 +1363,10 @@ def build_08():
     cells += [
         run_helper_code(),
         md("""
-## 3. 运行图文匹配
+## 3. Run image-text matching
 
-输入示例图 `model/demo.jpg`，demo 内置几条中文候选描述，输出每条的概率。
+Input: sample image `model/demo.jpg`; the demo has several built-in Chinese
+candidate captions and prints a probability for each.
 """),
         code("""
 show_images(["demos/chinese_clip/model/demo.jpg"], max_width=400)
@@ -1342,61 +1380,64 @@ run_demo(["./rknn_qaclipvit_demo",
           "model/demo.jpg", "1"], DEMO)
 """),
         md("""
-## 小结
+## Summary
 
-- CLIP 类模型把图文映射到同一向量空间，"匹配"就是算相似度，可做零样本分类/以文搜图。
-- 多模态模型的文本侧（tokenizer + embed）也需要一起部署，见 `model/chinese_clip_text.*`。
+- CLIP-style models map images and text into the same vector space; "matching"
+  is just similarity — usable for zero-shot classification / text-to-image search.
+- The text side of a multimodal model (tokenizer + embed) must be deployed too,
+  see `model/chinese_clip_text.*`.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 08 Qwen3-VL
+# ================================================================ 09 Qwen3-VL
 
 def build_09():
     files_2b = repo_files("qwen3-vl-2b-rknn3-rk1828", "demos/qwen3_vl_2b")
     files_4b = repo_files("qwen3-vl-4b-rknn3-rk1828", "demos/qwen3_vl_4b")
     files = files_2b + files_4b
     cells = [
-        cpp_intro("RK1828 Qwen3-VL 视觉语言大模型 Demo",
+        cpp_intro("RK1828 Qwen3-VL Vision-Language Model Demo",
                   """
-[Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)（通义千问）视觉语言模型：
-看图回答 / 图像描述。LLM 部分 **GRQ W4A16 量化**，视觉编码器 fp16，全部跑在 RK1828 上。
+[Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) (Tongyi Qianwen): image QA /
+captioning. The LLM part is **GRQ W4A16 quantized**, the vision encoder is
+fp16, both run on the RK1828.
 
-| 规格 | 生成速度（实测） |
+| Variant | Generation speed (measured) |
 |---|---|
 | Qwen3-VL-2B | 62.7 tokens/s |
 | Qwen3-VL-4B | 38.7 tokens/s |
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源，可只下 2B 或 4B） |
-| 2 | 解压预编译 demo |
-| 3 | 输入提示词，看图说话 |
+| 1 | Download models (from huggingface.co; you may fetch only 2B or 4B) |
+| 2 | Extract the prebuilt demo |
+| 3 | Enter a prompt and chat with the image |
 """),
         ENV_MD, ENV_CODE,
     ]
     cells += download_cells(
         files,
-        intro="两个规格共约 10GB。磁盘紧张的话，下载单元格可以改成只下载其中一个规格。")
+        intro="Both variants total ~10GB. If disk is tight, edit the download cell to fetch only one variant.")
     cells += extract_cells(["demos/qwen3_vl_2b", "demos/qwen3_vl_4b"])
     cells += [
         run_helper_code(),
         md("""
-## 3. 选择模型规格和提示词
+## 3. Pick a model variant and a prompt
 """),
         code("""
 import ipywidgets as widgets
 from IPython.display import display
 
-w_model = widgets.Dropdown(options=[("Qwen3-VL-2B（快）", "2b"),
-                                    ("Qwen3-VL-4B（更聪明）", "4b")],
-                           value="2b", description="模型:")
+w_model = widgets.Dropdown(options=[("Qwen3-VL-2B (faster)", "2b"),
+                                    ("Qwen3-VL-4B (smarter)", "4b")],
+                           value="2b", description="Model:")
 w_prompt = widgets.Textarea(value="Describe this image",
-                            description="提示词:",
+                            description="Prompt:",
                             layout=widgets.Layout(width="70%", height="60px"))
 display(w_model, w_prompt)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         code("""
 DEMO = f"demos/qwen3_vl_{w_model.value}"
@@ -1409,54 +1450,58 @@ run_demo(["./rknn_qwen3_vl_demo",
           "0xff", "0xff", "model/demo.jpg", w_prompt.value, "384", "384"], DEMO)
 """),
         md("""
-## 小结
+## Summary
 
-- VLM = 视觉编码器（把图片转成 token 嵌入）+ LLM（自回归生成文字），两部分都是独立 RKNN 模型。
-- `0xff 0xff` 是设备/会话参数占位；`384 384` 是视觉输入分辨率。
-- 换提示词试试中文提问、数数图里有几个人、识别文字等。
+- A VLM = vision encoder (image -> token embeddings) + LLM (autoregressive
+  text); both are separate RKNN models.
+- `0xff 0xff` are device/session placeholders; `384 384` is the vision input
+  resolution.
+- Try Chinese questions, counting people in the image, OCR, etc.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 09 Qwen3-ASR
+# ================================================================ 10 Qwen3-ASR
 
 def build_10():
     files = repo_files("qwen3-asr-rknn3-rk1828", "demos/qwen3_asr") + ASR_WAVS
     cells = [
-        cpp_intro("RK1828 Qwen3-ASR 语音识别 Demo",
+        cpp_intro("RK1828 Qwen3-ASR Speech Recognition Demo",
                   """
-[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)（通义千问）支持 **52 种语言和方言**，
-自动判断语种。拆成两部分，全部跑在 NPU 上：
+[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) (Tongyi Qianwen) supports
+**52 languages and dialects** with automatic language detection. Split into two
+parts, both on the NPU:
 
 ```
-音频(wav) -> [Audio Encoder] 提取音频特征 -> [LLM] 自回归生成文字 -> 识别结果
-             encoder.rknn (fp16)            llm.rknn (W4A16 量化)
+audio(wav) -> [Audio Encoder] features -> [LLM] autoregressive text -> transcript
+              encoder.rknn (fp16)       llm.rknn (W4A16 quantized)
 ```
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型和示例音频（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 选择音频并试听 |
-| 4 | 识别 |
+| 1 | Download models and sample audio (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Pick an audio clip and listen |
+| 4 | Transcribe |
 """),
         ENV_MD, ENV_CODE,
     ]
-    cells += download_cells(files, intro="示例音频来自其他 ASR 仓库，放在 `datasets/asr/` 共用。")
+    cells += download_cells(files, intro="Sample audio comes from the other ASR repos, shared under `datasets/asr/`.")
     cells += extract_cells(["demos/qwen3_asr"])
     cells += [
         run_helper_code(),
         md("""
-## 3. 选择音频并试听
+## 3. Pick an audio clip and listen
 """),
         wav_dropdown("test_zh.wav"),
         AUDIO_PLAY_MD,
         AUDIO_PLAY_CODE,
         md("""
-## 4. 识别
+## 4. Transcribe
 
-`0xff 0xff` 是设备/会话参数占位。实测一段 8.9 秒中文音频可以完整正确转写。
+`0xff 0xff` are device/session placeholders. An 8.9 s Chinese clip was
+transcribed fully and correctly in our tests.
 """),
         code("""
 import os
@@ -1470,32 +1515,34 @@ run_demo(["./rknn_qwen3_asr_demo",
           "0xff", "0xff", wav], DEMO)
 """),
         md("""
-## 小结
+## Summary
 
-- 编码器 + LLM 解耦：音频特征提取和文字生成分别在两个 RKNN 模型里完成。
-- 压缩包里还有一个 `rknn_qwen3_asr_demo_online`（流式版），可以试试看。
+- Encoder + LLM decoupled: acoustic features and text generation live in two
+  separate RKNN models.
+- The tarball also ships `rknn_qwen3_asr_demo_online` (streaming) — give it a try.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 10 Whisper
+# ================================================================ 11 Whisper
 
 def build_11():
     files = repo_files("whisper-base-rknn3-rk1828", "demos/whisper_base") + ASR_WAVS
     cells = [
-        cpp_intro("RK1828 Whisper-base 语音识别 Demo",
+        cpp_intro("RK1828 Whisper-base Speech Recognition Demo",
                   """
-OpenAI [whisper-base](https://github.com/openai/whisper)，中英文语音识别。
-拆成三个模型：**编码器** + **首 token 解码器（decode0）** + **自回归解码器（decode1）**，
-实测中文示例 RTF 0.073（比实时快约 14 倍）。
+OpenAI [whisper-base](https://github.com/openai/whisper), Chinese/English
+recognition. Split into three models: **encoder** + **first-token decoder
+(decode0)** + **autoregressive decoder (decode1)**. Measured RTF 0.073 on the
+Chinese sample (~14x realtime).
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型和示例音频（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 选择语种和音频 |
-| 4 | 识别 |
+| 1 | Download models and sample audio (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Pick language and audio |
+| 4 | Transcribe |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1504,26 +1551,26 @@ OpenAI [whisper-base](https://github.com/openai/whisper)，中英文语音识别
     cells += [
         run_helper_code(),
         md("""
-## 3. 选择语种和音频
+## 3. Pick language and audio
 """),
         code("""
 import glob
 import ipywidgets as widgets
 from IPython.display import display
 
-w_lang = widgets.Dropdown(options=[("中文", "zh"), ("English", "en")],
-                          value="zh", description="语种:")
+w_lang = widgets.Dropdown(options=[("Chinese", "zh"), ("English", "en")],
+                          value="zh", description="Language:")
 w_wav = widgets.Dropdown(options=sorted(glob.glob("datasets/asr/*.wav")),
-                         description="音频:", layout=widgets.Layout(width="60%"))
+                         description="Audio:", layout=widgets.Layout(width="60%"))
 if any(o.endswith('/test_zh.wav') for o in w_wav.options):
     w_wav.value = [o for o in w_wav.options if o.endswith('/test_zh.wav')][0]
 display(w_lang, w_wav)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         AUDIO_PLAY_MD,
         AUDIO_PLAY_CODE,
         md("""
-## 4. 识别
+## 4. Transcribe
 """),
         code("""
 import os
@@ -1538,33 +1585,36 @@ run_demo(["./rknn_whisper_raw_demo",
           "0xff", "0xff", "0xff", "--model-type", "base"], DEMO)
 """),
         md("""
-## 小结
+## Summary
 
-- Whisper 的自回归解码被拆成"首 token"和"后续 token"两个模型，是 NPU 部署 Transformer
-  decoder 的常见优化（首 token 不需要 KV cache）。
-- 长音频（如 `long_en.wav`）会被自动切分处理。
+- Whisper's autoregressive decoder is split into a "first token" model and a
+  "later tokens" model — a common NPU optimization for Transformer decoders
+  (the first token needs no KV cache).
+- Long audio (e.g. `long_en.wav`) is chunked automatically.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 11 Paraformer
+# ================================================================ 12 Paraformer
 
 def build_12():
     files = repo_files("paraformer-rknn3-rk1828", "demos/paraformer") + ASR_WAVS
     cells = [
-        cpp_intro("RK1828 Paraformer 中文语音识别 Demo（带热词）",
+        cpp_intro("RK1828 Paraformer Chinese ASR Demo (with hotwords)",
                   """
-阿里 [Paraformer](https://github.com/modelscope/FunASR)**非自回归**中文 ASR：
-一次前向直接输出全部文字（不像 Whisper 逐 token 生成），实测 RTF 0.046（约 21 倍实时）。
-还支持**热词增强**：给定的词汇会被优先识别（asf_scorer + 热词解码器）。
+Alibaba [Paraformer](https://github.com/modelscope/FunASR) **non-autoregressive**
+Chinese ASR: one forward pass emits the whole transcript (no token-by-token
+generation like Whisper). Measured RTF 0.046 (~21x realtime). It also supports
+**hotword boosting** — given words are recognized preferentially
+(asf_scorer + hotword decoder).
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型和示例音频（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 选择音频（可选热词模式） |
-| 4 | 识别 |
+| 1 | Download models and sample audio (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Pick audio (hotword mode optional) |
+| 4 | Transcribe |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1573,11 +1623,12 @@ def build_12():
     cells += [
         run_helper_code(),
         md("""
-## 3. 选择音频和模式
+## 3. Pick audio and mode
 
-- **普通模式**：`paraformer_encoder` + `paraformer_decoder`
-- **热词模式**：改用 `paraformer_decoder_hotword` + `asf_scorer`，按 `model/hotwords.txt`
-  里的热词增强识别（示例热词音频：datasets/asr/asr_example_hotword.wav）
+- **Normal mode**: `paraformer_encoder` + `paraformer_decoder`
+- **Hotword mode**: `paraformer_decoder_hotword` + `asf_scorer` instead,
+  boosting the words listed in `model/hotwords.txt`
+  (sample hotword audio: datasets/asr/asr_example_hotword.wav)
 """),
         code("""
 import glob
@@ -1585,17 +1636,17 @@ import ipywidgets as widgets
 from IPython.display import display
 
 w_wav = widgets.Dropdown(options=sorted(glob.glob("datasets/asr/*.wav")),
-                         description="音频:", layout=widgets.Layout(width="60%"))
+                         description="Audio:", layout=widgets.Layout(width="60%"))
 if any(o.endswith('/asr_example.wav') for o in w_wav.options):
     w_wav.value = [o for o in w_wav.options if o.endswith('/asr_example.wav')][0]
-w_hot = widgets.Checkbox(value=False, description="热词模式")
+w_hot = widgets.Checkbox(value=False, description="Hotword mode")
 display(w_wav, w_hot)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         AUDIO_PLAY_MD,
         AUDIO_PLAY_CODE,
         md("""
-## 4. 识别
+## 4. Transcribe
 """),
         code("""
 import os
@@ -1621,32 +1672,34 @@ else:
               "--audio_path", wav], DEMO)
 """),
         md("""
-## 小结
+## Summary
 
-- 非自回归 = 并行输出全部 token，比自回归 ASR 快一个数量级，适合实时场景。
-- 热词机制适合行业术语、人名地名等长尾词的识别纠偏。
+- Non-autoregressive = all tokens in parallel, an order of magnitude faster
+  than autoregressive ASR — great for realtime.
+- Hotwords help with domain terms, names and other long-tail words.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 12 SenseVoice
+# ================================================================ 13 SenseVoice
 
 def build_13():
     files = repo_files("sensevoice-small-rknn3-rk1828", "demos/sensevoice") + ASR_WAVS
     cells = [
-        cpp_intro("RK1828 SenseVoice-Small 多语言语音识别 Demo",
+        cpp_intro("RK1828 SenseVoice-Small Multilingual ASR Demo",
                   """
-阿里 [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice) 多语言 ASR，
-输出里除了文字还**内联语种、情感和声音事件标签**（如 `<|zh|><|HAPPY|><|Speech|>`），
-实测单条约 292ms。
+Alibaba [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)
+multilingual ASR. Besides the transcript, the output **inlines language,
+emotion and sound-event tags** (e.g. `<|zh|><|HAPPY|><|Speech|>`). Measured
+~292 ms per clip.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型和示例音频（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 选择音频 |
-| 4 | 识别（看富标签输出） |
+| 1 | Download models and sample audio (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Pick an audio clip |
+| 4 | Transcribe (see the rich tags) |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1655,13 +1708,13 @@ def build_13():
     cells += [
         run_helper_code(),
         md("""
-## 3. 选择音频
+## 3. Pick an audio clip
 """),
         wav_dropdown("sensevoice_zh.wav"),
         AUDIO_PLAY_MD,
         AUDIO_PLAY_CODE,
         md("""
-## 4. 识别
+## 4. Transcribe
 """),
         code("""
 import os
@@ -1673,32 +1726,34 @@ run_demo(["./rknn_sensevoice_demo",
           wav, "0x1"], DEMO)
 """),
         md("""
-## 小结
+## Summary
 
-- SenseVoice 把"语种/情感/事件"当成特殊 token 直接生成，一次推理得到转写 + 副语言信息。
-- 模型输入固定 10s，短音频会自动补齐。
+- SenseVoice generates "language/emotion/event" as special tokens, so one
+  inference gives you the transcript plus paralinguistic info.
+- The model input is fixed at 10 s; shorter audio is padded automatically.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 13 强制对齐
+# ================================================================ 14 forced aligner
 
 def build_14():
     files = repo_files("qwen3-forced-aligner-rknn3-rk1828", "demos/forced_aligner")
     cells = [
-        cpp_intro("RK1828 Qwen3-ForcedAligner 强制对齐 Demo",
+        cpp_intro("RK1828 Qwen3-ForcedAligner Demo",
                   """
-[Qwen3-ForcedAligner](https://github.com/QwenLM/Qwen3-ForcedAligner)：
-给定**音频 + 已知文本**，输出每个字/词的时间戳（TSV），中英文均可，实测 RTF 0.041。
-典型用途：字幕生成、歌词对齐、语音数据标注。
+[Qwen3-ForcedAligner](https://github.com/QwenLM/Qwen3-ForcedAligner): given
+**audio + known text**, output a timestamp per character/word (TSV), Chinese
+and English, measured RTF 0.041. Typical uses: subtitle generation, lyrics
+alignment, speech-data labeling.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型和示例音频（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 输入文本并运行 |
-| 4 | 查看时间戳结果 |
+| 1 | Download models and sample audio (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Enter the text and run |
+| 4 | View the timestamps |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1707,23 +1762,23 @@ def build_14():
     cells += [
         run_helper_code(),
         md("""
-## 3. 输入要对齐的文本
+## 3. Enter the text to align
 
-仓库自带示例 `audio.wav`（中文："欢迎大家来到么哒社区进行体验"），
-也可以换自己的 wav + 对应文本。
+The repo ships a sample `audio.wav` (Chinese). You can also use your own
+wav + matching transcript.
 """),
         code("""
 import ipywidgets as widgets
 from IPython.display import display
 
-w_wav = widgets.Text(value="audio.wav", description="音频:",
+w_wav = widgets.Text(value="audio.wav", description="Audio:",
                      layout=widgets.Layout(width="60%"))
 w_text = widgets.Textarea(value="欢迎大家来到么哒社区进行体验",
-                          description="文本:",
+                          description="Text:",
                           layout=widgets.Layout(width="70%", height="50px"))
-w_lang = widgets.Dropdown(options=["Chinese", "English"], description="语言:")
+w_lang = widgets.Dropdown(options=["Chinese", "English"], description="Language:")
 display(w_wav, w_text, w_lang)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         code("""
 DEMO = "demos/forced_aligner"
@@ -1737,16 +1792,16 @@ run_demo(["./rknn_qwen3_forced_aligner_demo",
           "--output_path", "./result.tsv"], DEMO)
 """),
         md("""
-## 4. 查看时间戳（TSV：开始秒 / 结束秒 / 字）
+## 4. View the timestamps (TSV: start s / end s / token)
 """),
         code("""
 import csv
 
 rows = list(csv.reader(open("demos/forced_aligner/result.tsv"), delimiter="\\t"))
 if rows and rows[0][0].lower().startswith("start"):
-    rows = rows[1:]  # 去掉表头 start_ms / end_ms / text
+    rows = rows[1:]  # drop the header start_ms / end_ms / text
 rows = [(float(r[0]) / 1000, float(r[1]) / 1000, r[2]) for r in rows]  # ms -> s
-print(f"{'开始(s)':>8} {'结束(s)':>8}  字")
+print(f"{'start(s)':>8} {'end(s)':>8}  token")
 for s, e, t in rows:
     print(f"{s:8.2f} {e:8.2f}  {t}")
 """),
@@ -1766,16 +1821,17 @@ plt.plot(t, data, lw=0.3, color="#888")
 for s, e, txt in rows:
     plt.axvspan(s, e, alpha=0.25)
     plt.text((s + e) / 2, 0.8, txt, ha="center", fontsize=9)
-plt.title("音频波形上的对齐结果")
-plt.xlabel("秒")
+plt.title("alignment over the waveform")
+plt.xlabel("seconds")
 plt.tight_layout()
 plt.show()
 """),
         md("""
-## 小结
+## Summary
 
-- 对齐不是"识别"：文本已知，模型只负责把每个字**钉到时间轴上**。
-- 波形图上可以直观看到每段 span 与发音的对应关系。
+- Alignment is not recognition: the text is known, the model only **pins each
+  token onto the timeline**.
+- The waveform view makes the span-to-sound correspondence clearly visible.
 """),
     ]
     return notebook(cells)
@@ -1786,24 +1842,26 @@ plt.show()
 def build_15():
     files = repo_files("vits-tts-rknn3-rk1828", "demos/vits_tts")
     cells = [
-        cpp_intro("RK1828 VITS 语音合成 Demo",
+        cpp_intro("RK1828 VITS Text-to-Speech Demo",
                   """
-[VITS](https://github.com/jaywalnut310/vits) 端到端英文 TTS。两个预训练模型：
+[VITS](https://github.com/jaywalnut310/vits) end-to-end English TTS. Two
+pretrained models:
 
-| 模型 | 说话人 |
+| Model | Speakers |
 |---|---|
-| LJSpeech | 单一女声 |
-| VCTK | 109 个说话人（用 `--speaker_id` 选择） |
+| LJSpeech | single female voice |
+| VCTK | 109 speakers (choose with `--speaker_id`) |
 
-每个模型拆成 step1（文本编码 + 时长）和 step2（flow + 声码器）两个 RKNN 模型，
-滑窗推理，LJSpeech 实测 RTF 0.345。音素数据依赖 `model/espeak-ng-data/`。
+Each model is split into step1 (text encoding + durations) and step2
+(flow + vocoder), running with a sliding window; LJSpeech measured RTF 0.345.
+Phoneme data lives under `model/espeak-ng-data/`.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 输入英文文本并合成 |
-| 4 | 试听 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Enter English text and synthesize |
+| 4 | Listen |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1812,23 +1870,23 @@ def build_15():
     cells += [
         run_helper_code(),
         md("""
-## 3. 输入文本并合成
+## 3. Enter text and synthesize
 """),
         code("""
 import ipywidgets as widgets
 from IPython.display import display
 
-w_model = widgets.Dropdown(options=[("LJSpeech 单女声", "ljs"),
-                                    ("VCTK 多说话人", "vctk")],
-                           description="模型:")
+w_model = widgets.Dropdown(options=[("LJSpeech single female voice", "ljs"),
+                                    ("VCTK multi-speaker", "vctk")],
+                           description="Model:")
 w_speaker = widgets.IntSlider(value=4, min=0, max=108,
-                              description="说话人ID:",
+                              description="Speaker ID:",
                               style={"description_width": "80px"})
 w_text = widgets.Textarea(value="VITS is awesome! Have a nice day.",
-                          description="文本:",
+                          description="Text:",
                           layout=widgets.Layout(width="70%", height="50px"))
 display(w_model, w_speaker, w_text)
-print("选好后继续往下运行 ▼（说话人ID 仅 VCTK 有效）")
+print("Then keep running downwards ▼ (Speaker ID only works for VCTK)")
 """),
         code("""
 DEMO = "demos/vits_tts"
@@ -1845,38 +1903,40 @@ if w_model.value == "vctk":
 run_demo(args, DEMO)
 """),
         md("""
-## 4. 试听合成结果
+## 4. Listen to the result
 """),
         code("""
 show_audio("demos/vits_tts/out.wav")
 """),
         md("""
-## 小结
+## Summary
 
-- TTS 流水线：文本 -> 音素（espeak-ng）-> step1 出时长/声学特征 -> step2 出声波。
-- 换几个 speaker_id 对比不同说话人的音色。
+- TTS pipeline: text -> phonemes (espeak-ng) -> step1 durations/acoustic
+  features -> step2 waveform.
+- Try a few speaker_id values to compare voices.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 15 Embedding
+# ================================================================ 16 Embedding
 
 def build_16():
     files = repo_files("qwen3-embedding-0.6b-rknn3-rk1828", "demos/qwen3_embedding")
     cells = [
-        cpp_intro("RK1828 Qwen3-Embedding 文本向量 Demo",
+        cpp_intro("RK1828 Qwen3-Embedding Text Vector Demo",
                   """
-[Qwen3-Embedding-0.6B](https://github.com/QwenLM/Qwen3-Embedding)：
-把文本编码成 **1024 维向量**，用于语义搜索 / RAG 检索。GRQ W4A16 量化，
-实测单条 prefill 76.7ms； paraphrase 余弦相似度 0.958 vs 无关文本 0.283。
+[Qwen3-Embedding-0.6B](https://github.com/QwenLM/Qwen3-Embedding): encodes
+text into **1024-dim vectors** for semantic search / RAG retrieval. GRQ W4A16
+quantized, measured 76.7 ms prefill per sentence; paraphrase cosine similarity
+0.958 vs 0.283 for an unrelated text.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 输入若干句子并批量编码 |
-| 4 | 余弦相似度矩阵 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Enter sentences and batch-encode |
+| 4 | Cosine similarity matrix |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1885,9 +1945,10 @@ def build_16():
     cells += [
         run_helper_code(),
         md("""
-## 3. 输入句子并编码
+## 3. Enter sentences and encode
 
-每行一句。demo 每次编码一句，把 1024 维 float32 向量写到 `embedding_out.bin`。
+One sentence per line. The demo encodes one sentence per run and writes the
+1024-dim float32 vector to `embedding_out.bin`.
 """),
         code("""
 import ipywidgets as widgets
@@ -1898,9 +1959,9 @@ w_texts = widgets.Textarea(
           "I forgot my password, how can I change it?\\n"
           "What's the best way to cook rice?\\n"
           "如何重置我的密码？",
-    description="句子(每行一句):", layout=widgets.Layout(width="75%", height="120px"))
+    description="Sentences (one per line):", layout=widgets.Layout(width="75%", height="120px"))
 display(w_texts)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         code("""
 import numpy as np
@@ -1916,12 +1977,13 @@ for t in texts:
               "0xff", t], DEMO)
     embs.append(np.fromfile(f"{DEMO}/embedding_out.bin", dtype=np.float32))
 embs = np.stack(embs)
-print("向量矩阵:", embs.shape)
+print("embedding matrix:", embs.shape)
 """),
         md("""
-## 4. 余弦相似度矩阵
+## 4. Cosine similarity matrix
 
-语义相近的句子（含跨语言）相似度应该接近 1，无关的接近 0。
+Semantically close sentences (even across languages) should score near 1,
+unrelated ones near 0.
 """),
         code("""
 import matplotlib.pyplot as plt
@@ -1940,37 +2002,39 @@ for i in range(len(texts)):
         ax.text(j, i, f"{sim[i,j]:.2f}", ha="center", va="center",
                 color="white" if sim[i, j] > 0.6 else "black")
 plt.colorbar(im)
-plt.title("余弦相似度")
+plt.title("cosine similarity")
 plt.tight_layout()
 plt.show()
 """),
         md("""
-## 小结
+## Summary
 
-- Embedding 模型只看"语义距离"，与语种无关 —— 可以试试中英混排的同义句。
-- 这是 RAG 系统的检索侧组件；配合 16 号 notebook 的 Reranker 就是完整的检索 + 精排。
+- An embedding model only measures "semantic distance", regardless of
+  language — try mixed Chinese/English paraphrases.
+- This is the retrieval side of a RAG system; pair it with the Reranker in
+  notebook 17 for the full retrieve + rerank pipeline.
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 16 Reranker
+# ================================================================ 17 Reranker
 
 def build_17():
     files = repo_files("qwen3-reranker-0.6b-rknn3-rk1828", "demos/qwen3_reranker")
     cells = [
-        cpp_intro("RK1828 Qwen3-Reranker 文档重排序 Demo",
+        cpp_intro("RK1828 Qwen3-Reranker Demo",
                   """
-[Qwen3-Reranker-0.6B](https://github.com/QwenLM/Qwen3-Embedding)：
-给（query, document）对打 0~1 的相关性分数，用于 RAG 精排。GRQ W4A16 量化，
-实测单对 prefill 132ms；相关 0.9985 vs 无关 0.0000。
+[Qwen3-Reranker-0.6B](https://github.com/QwenLM/Qwen3-Embedding): scores a
+(query, document) pair with a 0~1 relevance score for RAG reranking. GRQ W4A16
+quantized, measured 132 ms prefill per pair; relevant 0.9985 vs irrelevant 0.0000.
 
-| 步骤 | 内容 |
+| Step | Content |
 |---|---|
-| 1 | 下载模型（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 输入 query 和候选文档 |
-| 4 | 打分排序 |
+| 1 | Download models (from huggingface.co) |
+| 2 | Extract the prebuilt demo |
+| 3 | Enter a query and candidate documents |
+| 4 | Score and rank |
 """),
         ENV_MD, ENV_CODE,
     ]
@@ -1979,7 +2043,7 @@ def build_17():
     cells += [
         run_helper_code(),
         md("""
-## 3. 输入 query 和候选文档（每行一篇）
+## 3. Enter a query and candidate documents (one per line)
 """),
         code("""
 import ipywidgets as widgets
@@ -1992,12 +2056,12 @@ w_docs = widgets.Textarea(
           "The best chocolate chip cookie recipe uses brown butter.\\n"
           "LIGO first detected gravitational waves in 2015, confirming Einstein's prediction.\\n"
           "Python is a popular programming language for data science.",
-    description="文档(每行一篇):", layout=widgets.Layout(width="75%", height="120px"))
+    description="Docs (one per line):", layout=widgets.Layout(width="75%", height="120px"))
 display(w_query, w_docs)
-print("选好后继续往下运行 ▼")
+print("Then keep running downwards ▼")
 """),
         md("""
-## 4. 打分排序
+## 4. Score and rank
 """),
         code("""
 import re
@@ -2014,13 +2078,13 @@ for d in docs:
                   "model/Qwen3-Reranker-0.6B.embed.bin",
                   "0xff", w_query.value, d], DEMO)
     nums = re.findall(r"(?:score|Score|relevance)[:\\s]+([0-9]*\\.?[0-9]+)", p.stdout)
-    if not nums:  # 兜底：取输出中最后一个 0~1 的小数
+    if not nums:  # fallback: take the last 0~1 decimal in the output
         nums = re.findall(r"(?<![\\d.])(0?\\.[0-9]+|1\\.0+)(?![\\d.])", p.stdout)
     scores.append(float(nums[-1]))
     print(f"  -> {scores[-1]:.4f}")
 
 order = np.argsort(scores)[::-1]
-print("\\n按相关性排序:")
+print("\\nRanked by relevance:")
 for i in order:
     print(f"  {scores[i]:.4f}  {docs[i][:60]}")
 """),
@@ -2039,10 +2103,12 @@ plt.tight_layout()
 plt.show()
 """),
         md("""
-## 小结
+## Summary
 
-- Reranker 是 RAG 的"精排"：先用 Embedding 粗排出 top-K，再用它逐个精排提准。
-- 相关与不相关的分数差非常极端（0.99 vs 0.00），说明模型区分度很好。
+- A reranker is the "fine ranking" stage of RAG: embeddings shortlist top-K,
+  the reranker re-scores them one by one for precision.
+- The score gap between relevant and irrelevant is extreme (0.99 vs 0.00),
+  showing excellent discrimination.
 """),
     ]
     return notebook(cells)

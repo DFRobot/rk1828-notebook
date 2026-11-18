@@ -1,12 +1,12 @@
 #!/bin/bash
-# 下载全部 notebook 需要的模型文件（可选下载源）
-# 用法: bash download_models.sh [mirror|hf]   默认 mirror（HF-Mirror 国内镜像）
+# Download every model file needed by the notebooks (from huggingface.co).
+# Usage: bash download_models.sh [hf|mirror]   default: hf (huggingface.co)
 set -e
 cd "$(dirname "$0")"
-SRC="${1:-mirror}"
+SRC="${1:-hf}"
 case "$SRC" in
   mirror|hf) ;;
-  *) echo "用法: bash download_models.sh [mirror|hf]"; exit 1;;
+  *) echo "Usage: bash download_models.sh [hf|mirror]"; exit 1;;
 esac
 
 python3 - "$SRC" <<'PYEOF'
@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, ".")
 from nb_download import ensure_files
 
-# 从各 notebook 的 FILES 清单汇总（单一事实来源）
+# Aggregate the FILES lists from every notebook (single source of truth)
 files = []
 for nb_path in sorted(glob.glob("*.ipynb")):
     nb = json.load(open(nb_path))
@@ -31,15 +31,15 @@ for nb_path in sorted(glob.glob("*.ipynb")):
         if m:
             files.extend(ast.literal_eval(m.group(1)))
 
-# 按本地路径去重
+# De-duplicate by local path
 seen, uniq = set(), []
 for f in files:
     if f[2] not in seen:
         seen.add(f[2])
         uniq.append(f)
 
-print(f"共 {len(uniq)} 个文件（已去重）")
+print(f"{len(uniq)} files (de-duplicated)")
 ensure_files(uniq, sys.argv[1])
 PYEOF
 
-echo "== 全部模型下载完成 =="
+echo "== all models downloaded =="

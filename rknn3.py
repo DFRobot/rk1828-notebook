@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""RKNN3 Runtime (librknn3_api.so) 的 ctypes 封装。
+"""ctypes wrapper for the RKNN3 Runtime (librknn3_api.so).
 
-面向 notebook 的最小可用接口：
+Minimal notebook-friendly interface:
 
     from rknn3 import Rknn3Model, find_devices
 
@@ -9,9 +9,9 @@
     outputs = model.infer([input_np])   # -> list[np.ndarray]
     model.close()
 
-调用链（与官方 C demo 一致）：
+Call chain (same as the official C demo):
     rknn3_init -> rknn3_load_model_from_path -> rknn3_model_init
-    -> rknn3_query(输入输出属性) -> rknn3_create_mem / rknn3_mem_sync
+    -> rknn3_query (input/output attrs) -> rknn3_create_mem / rknn3_mem_sync
     -> rknn3_run -> rknn3_destroy_mem / rknn3_destroy
 """
 import ctypes
@@ -28,13 +28,13 @@ RKNN3_MAX_DEVS = 64
 RKNN3_MAX_DEV_LEN = 64
 RKNN3_MAX_NPU_NODE_NUM = 128
 
-# 查询命令
+# query commands
 QUERY_IN_OUT_NUM = 0
 QUERY_INPUT_ATTR = 1
 QUERY_OUTPUT_ATTR = 2
 QUERY_SDK_VERSION = 5
 
-# mem_sync 方向
+# mem_sync directions
 SYNC_TO_DEVICE = 0x1
 SYNC_FROM_DEVICE = 0x2
 
@@ -51,7 +51,7 @@ _DTYPE_MAP = {
     8: np.int64,
     9: np.uint64,
     10: np.bool_,
-    13: np.uint16,  # BFLOAT16 按 2 字节读出，调用方自行解释
+    13: np.uint16,  # BFLOAT16 read as raw 2 bytes; caller interprets
 }
 _DTYPE_NAME = {0: "FP32", 1: "FP16", 2: "INT8", 3: "UINT8", 4: "INT16",
                5: "UINT16", 6: "INT32", 7: "UINT32", 8: "INT64", 9: "UINT64",
@@ -169,12 +169,12 @@ _lib = None
 
 
 def get_lib():
-    """加载 /usr/lib/librknn3_api.so（单例）。"""
+    """Load /usr/lib/librknn3_api.so (singleton)."""
     global _lib
     if _lib is None:
         if not os.path.exists(_LIB_PATH):
             raise RuntimeError(
-                f"{_LIB_PATH} 不存在，请先安装 RKNN3 运行时（rknn3-rk182x DEB 包）")
+                f"{_LIB_PATH} not found; install the RKNN3 runtime first (rknn3-rk182x DEB package)")
         _lib = ctypes.CDLL(_LIB_PATH)
         c = ctypes
         _lib.rknn3_init.argtypes = [c.POINTER(c.c_uint64), c.c_void_p]
@@ -193,18 +193,18 @@ def get_lib():
 
 
 def find_devices():
-    """枚举 RK1828 设备，返回 [(device_id, device_type), ...]。"""
+    """Enumerate RK1828 devices; returns [(device_id, device_type), ...]."""
     lib = get_lib()
     devs = _Devices()
     ret = lib.rknn3_find_devices(ctypes.byref(devs))
     if ret != 0:
-        raise RuntimeError(f"rknn3_find_devices 失败: {ret}")
+        raise RuntimeError(f"rknn3_find_devices failed: {ret}")
     return [(devs.devices[i].id.decode(), devs.devices[i].type.decode())
             for i in range(devs.n_devices)]
 
 
 class Rknn3Model:
-    """一个加载到 RK1828 上的 RKNN3 模型（权重分离格式 .rknn + .weight）。"""
+    """An RKNN3 model loaded onto the RK1828 (split .rknn graph + .weight)."""
 
     def __init__(self, model_path, weight_path=None, core_mask=0x1):
         if weight_path is None:
@@ -219,17 +219,17 @@ class Rknn3Model:
         self._ctx = ctypes.c_uint64(0)
         ret = lib.rknn3_init(ctypes.byref(self._ctx), None)
         if ret != 0:
-            raise RuntimeError(f"rknn3_init 失败: {ret}")
+            raise RuntimeError(f"rknn3_init failed: {ret}")
         try:
             ret = lib.rknn3_load_model_from_path(
                 self._ctx, model_path.encode(), weight_path.encode())
             if ret != 0:
-                raise RuntimeError(f"rknn3_load_model_from_path 失败: {ret}")
+                raise RuntimeError(f"rknn3_load_model_from_path failed: {ret}")
             cfg = _Config()
             cfg.run_core_mask = core_mask
             ret = lib.rknn3_model_init(self._ctx, ctypes.byref(cfg))
             if ret != 0:
-                raise RuntimeError(f"rknn3_model_init 失败: {ret}")
+                raise RuntimeError(f"rknn3_model_init failed: {ret}")
         except Exception:
             lib.rknn3_destroy(self._ctx)
             self._ctx = None
@@ -240,12 +240,12 @@ class Rknn3Model:
         self.input_attrs = self._query_attrs(QUERY_INPUT_ATTR, io_num.n_input)
         self.output_attrs = self._query_attrs(QUERY_OUTPUT_ATTR, io_num.n_output)
 
-        # 为每个输入/输出分配设备内存
+        # allocate device memory for every input/output
         self._in_mems = [self._alloc(a) for a in self.input_attrs]
         self._out_mems = [self._alloc(a) for a in self.output_attrs]
         self._inputs = (Tensor * len(self.input_attrs))()
         self._outputs = (Tensor * len(self.output_attrs))()
-        self._attr_bufs = []  # 防止 attr 被 GC
+        self._attr_bufs = []  # keep attrs alive against GC
         for i, (t, m, a) in enumerate(zip(self._inputs, self._in_mems, self.input_attrs)):
             pa = ctypes.pointer(a)
             self._attr_bufs.append(pa)
@@ -261,7 +261,7 @@ class Rknn3Model:
         ret = self._lib.rknn3_query(self._ctx, cmd, ctypes.byref(obj),
                                     ctypes.sizeof(obj))
         if ret != 0:
-            raise RuntimeError(f"rknn3_query(cmd={cmd}) 失败: {ret}")
+            raise RuntimeError(f"rknn3_query(cmd={cmd}) failed: {ret}")
 
     def _query_attrs(self, cmd, n):
         attrs = []
@@ -277,34 +277,34 @@ class Rknn3Model:
                    attr.n_elems * np.dtype(attr.np_dtype).itemsize, 1)
         mem = self._lib.rknn3_create_mem(self._ctx, size, attr.core_id, 1)
         if not mem:
-            raise RuntimeError(f"rknn3_create_mem({size}) 失败")
+            raise RuntimeError(f"rknn3_create_mem({size}) failed")
         return mem
 
     def infer(self, inputs):
-        """inputs: list[np.ndarray]（按 input_attrs 顺序），返回 list[np.ndarray]。"""
+        """inputs: list[np.ndarray] (in input_attrs order); returns list[np.ndarray]."""
         if len(inputs) != len(self.input_attrs):
-            raise ValueError(f"需要 {len(self.input_attrs)} 个输入，给了 {len(inputs)} 个")
+            raise ValueError(f"expected {len(self.input_attrs)} inputs, got {len(inputs)}")
         for arr, attr, mem in zip(inputs, self.input_attrs, self._in_mems):
             data = np.ascontiguousarray(arr, dtype=attr.np_dtype)
             buf = data.tobytes()
             if len(buf) > mem.contents.size:
                 raise ValueError(
-                    f"输入 {attr.name_str} 需要 {len(buf)}B，超过分配的 {mem.contents.size}B")
+                    f"input {attr.name_str} needs {len(buf)}B, exceeds the allocated {mem.contents.size}B")
             ctypes.memmove(mem.contents.virt_addr, buf, len(buf))
             ret = self._lib.rknn3_mem_sync(self._ctx, mem, SYNC_TO_DEVICE)
             if ret != 0:
-                raise RuntimeError(f"mem_sync(to_device) 失败: {ret}")
+                raise RuntimeError(f"mem_sync(to_device) failed: {ret}")
 
         ret = self._lib.rknn3_run(self._ctx, self._inputs, len(self._inputs),
                                   self._outputs, len(self._outputs))
         if ret != 0:
-            raise RuntimeError(f"rknn3_run 失败: {ret}")
+            raise RuntimeError(f"rknn3_run failed: {ret}")
 
         outs = []
         for attr, mem in zip(self.output_attrs, self._out_mems):
             ret = self._lib.rknn3_mem_sync(self._ctx, mem, SYNC_FROM_DEVICE)
             if ret != 0:
-                raise RuntimeError(f"mem_sync(from_device) 失败: {ret}")
+                raise RuntimeError(f"mem_sync(from_device) failed: {ret}")
             n = attr.n_elems
             arr = np.frombuffer(
                 (ctypes.c_char * (n * np.dtype(attr.np_dtype).itemsize)).from_address(

@@ -75,20 +75,18 @@ Open any notebook and **run the cells top to bottom**.
 
 ## Model download
 
-The **first step of every notebook downloads the models**: pick a source from
-the dropdown; files that already exist are skipped automatically:
-
-| Source | Host | Best for |
-|---|---|---|
-| **HF-Mirror** (default) | `hf-mirror.com` | Direct access in China, faster |
-| **Hugging Face** | `huggingface.co` | Overseas or behind a proxy |
+The **first step of every notebook downloads the models** directly from
+**huggingface.co**; files that already exist are skipped automatically, so
+re-running never downloads twice. If your network cannot reach
+huggingface.co, set a proxy before starting Jupyter, e.g.
+`export https_proxy=http://<your-proxy>:<port>`.
 
 All models are hosted at [huggingface.co/qhddz](https://huggingface.co/qhddz).
 To download everything from the command line (~25 GB):
 
 ```bash
-bash download_models.sh            # default: HF-Mirror
-bash download_models.sh hf         # Hugging Face official
+bash download_models.sh            # default: huggingface.co
+bash download_models.sh mirror     # hf-mirror.com (China mirror)
 ```
 
 ## Notebook list
@@ -123,7 +121,7 @@ step; 06-17 drive prebuilt x86_64 C++ demos from the official
 ```
 ├── 01_classification.ipynb ... 17_Qwen3_Reranker.ipynb
 ├── rknn3.py            # ctypes wrapper of librknn3_api.so (Rknn3Model)
-├── nb_download.py      # model download (HF / HF-Mirror picker, skip existing)
+├── nb_download.py      # model download (huggingface.co, skip existing)
 ├── nb_demo.py          # C++ demo runner / result display helpers
 ├── vision_post.py      # YOLO/FastSAM pre/post-processing (letterbox/NMS/decode/masks)
 ├── download_models.sh  # batch download of all models (CLI)
