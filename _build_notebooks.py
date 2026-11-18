@@ -172,6 +172,7 @@ def build_01():
 | 3 | 前处理（把图片变成模型能吃的张量） |
 | 4 | RKNN 推理（在 NPU 上运行） |
 | 5 | 后处理（反量化 + Softmax，输出 Top-5） |
+| 6 | 多模型对比（2 模型 × 2 量化全量跑一遍） |
 
 > 小知识：**i8** 是把权重压成 8bit 整数的量化版本，更小更快；
 > **fp16** 是 16bit 浮点版本。两种都可以跑一遍对比结果。
@@ -292,10 +293,110 @@ plt.show()
 model.close()
 """),
         md("""
+## 6. 多模型对比（i8 + fp16 全量）
+
+同一张图，把 **2 个模型 × 2 种量化（i8 / fp16）共 4 组**全部跑一遍。
+运行过程实时打印进度；全部完成后输出对比表格、耗时柱状图和 Top-5 效果拼图。
+每个模型计时 3 次取最快（排除首次预热抖动）。
+"""),
+        code("""
+import time
+from rknn3 import Rknn3Model
+from vision_post import dequant
+
+ALL_MODELS = ["mobilenet_v2", "resnet50_v2"]
+QUANTS = ["i8", "fp16"]
+
+compare = []  # (model, quant, latency_ms, top5_idx, top5_prob)
+total = len(ALL_MODELS) * len(QUANTS)
+step = 0
+for name in ALL_MODELS:
+    for quant in QUANTS:
+        step += 1
+        print(f"[{step}/{total}] 加载 {name} ({quant}) ...", flush=True)
+        m = Rknn3Model(f"models/cnn/{name}/{quant}/{name}.rknn")
+        m.infer([x])  # 预热
+        best, outs = float("inf"), None
+        for _ in range(3):
+            t0 = time.time()
+            outs = m.infer([x])
+            best = min(best, (time.time() - t0) * 1000)
+        logits = dequant(outs[0], m.output_attrs[0]).ravel()
+        p = np.exp(logits - logits.max())
+        p /= p.sum()
+        top5_i = p.argsort()[::-1][:5]
+        compare.append((name, quant, best, top5_i, p[top5_i]))
+        m.close()
+        print(f"      -> {best:6.1f} ms, Top-1: {LABELS[top5_i[0]]} "
+              f"({p[top5_i[0]]*100:.1f}%)", flush=True)
+print("\\n全部完成 ✅", flush=True)
+"""),
+        md("""
+### 对比表格
+"""),
+        code("""
+from IPython.display import HTML
+
+rows = "".join(
+    f"<tr><td>{n}</td><td>{q}</td><td>{lat:.1f}</td>"
+    f"<td>{', '.join(f'{LABELS[i]}({pp*100:.1f}%)' for i, pp in list(zip(t, pr))[:5])}</td></tr>"
+    for n, q, lat, t, pr in compare)
+HTML("<table style='text-align:left'>"
+     "<tr><th>模型</th><th>量化</th><th>耗时(ms)</th><th>Top-5（概率）</th></tr>"
+     + rows + "</table>")
+"""),
+        md("""
+### 耗时柱状图（i8 vs fp16）
+"""),
+        code("""
+import matplotlib.pyplot as plt
+from vision_post import setup_cjk_font
+
+setup_cjk_font()
+colors = {"i8": "#3b82f6", "fp16": "#f59e0b"}
+xs = np.arange(len(ALL_MODELS))
+width = 0.38
+fig, ax = plt.subplots(figsize=(8, 4.5))
+for k, q in enumerate(QUANTS):
+    lats = [lat for n, qq, lat, *_ in compare if qq == q]
+    tops = [LABELS[t[0]] for n, qq, _, t, _ in compare if qq == q]
+    bars = ax.bar(xs + (k - 0.5) * width, lats, width, label=q, color=colors[q])
+    for bar, lat, top in zip(bars, lats, tops):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                f"{lat:.0f}ms\\n{top}", ha="center", va="bottom", fontsize=8)
+ax.set_xticks(xs, ALL_MODELS)
+ax.set_ylabel("推理耗时 (ms)")
+ax.set_title("分类模型对比（同一张图，i8 vs fp16）")
+ax.set_ylim(0, max(lat for _, _, lat, *_ in compare) * 1.35)
+ax.legend()
+plt.tight_layout()
+plt.show()
+"""),
+        md("""
+### Top-5 效果拼图
+"""),
+        code("""
+import matplotlib.pyplot as plt
+from vision_post import setup_cjk_font
+
+setup_cjk_font()
+fig, axes = plt.subplots(2, 2, figsize=(13, 7))
+for ax, (n, q, lat, t, pr) in zip(axes.flat, compare):
+    names = [LABELS[i] for i in t][::-1]
+    ax.barh(names, list(pr)[::-1], color="#3b82f6" if q == "i8" else "#f59e0b")
+    ax.set_xlim(0, 1)
+    ax.set_title(f"{n} ({q})  {lat:.0f}ms", fontsize=11)
+plt.tight_layout()
+plt.show()
+"""),
+        md("""
 ## 小结
 
 - 完整流程：**下载模型 → 前处理 → NPU 推理 → 反量化/Softmax → Top-5**
-- 可以回到第 2 步换模型/量化版本，对比 i8 与 fp16 的 Top-1 是否一致、耗时差多少。
+- 从第 6 步的对比可以看到：
+  - **mobilenet_v2**（轻量，3.4M 参数）明显比 **resnet50_v2**（经典，25M 参数）快；
+    ResNet50-v2 精度更高（ImageNet Top-1 约 72% vs 75.6%，论文值）。
+  - 同一模型的 i8 通常比 fp16 更快，Top-5 结果基本一致——量化带来的精度损失很小。
 """),
     ]
     return notebook(cells)
