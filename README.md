@@ -63,8 +63,13 @@ ipywidgets / jupyter`.
 ### 5. Launch Jupyter
 
 ```bash
-jupyter lab   # or: jupyter notebook
+bash start_jupyter.sh          # listens on 0.0.0.0:8888 (LAN accessible)
+# or: jupyter lab              # uses ~/.jupyter/jupyter_lab_config.py (also 0.0.0.0)
 ```
+
+Jupyter is configured to listen on `0.0.0.0:8888`, so other machines on the
+LAN can open `http://<host-ip>:8888` directly. Token auth stays enabled —
+copy the full URL with `?token=...` from the startup log (or `jupyter lab list`).
 
 Open any notebook and **run the cells top to bottom**.
 

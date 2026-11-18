@@ -57,8 +57,13 @@ pip install -r requirements.txt
 ### 5. 启动 Jupyter
 
 ```bash
-jupyter lab   # 或 jupyter notebook
+bash start_jupyter.sh          # 监听 0.0.0.0:8888（局域网可访问）
+# 或: jupyter lab              # 使用 ~/.jupyter/jupyter_lab_config.py（同样是 0.0.0.0）
 ```
+
+Jupyter 已配置为监听 `0.0.0.0:8888`，局域网内其他机器可直接访问
+`http://<本机IP>:8888`。token 认证保持开启——从启动日志（或 `jupyter lab list`）
+复制带 `?token=...` 的完整 URL 即可登录。
 
 打开任意 notebook，**从上到下顺序运行**。
 
