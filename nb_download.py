@@ -52,6 +52,26 @@ def source_picker(default=DEFAULT_SOURCE):
     return w
 
 
+_UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
+                     "AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+
+
+def _open(url, timeout=60, max_redirects=5):
+    """urllib's default redirect handling rejects 308 (hf-mirror returns it
+    occasionally); follow every 3xx manually."""
+    from urllib.parse import urljoin
+    for _ in range(max_redirects + 1):
+        req = urllib.request.Request(url, headers=_UA)
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
+                url = urljoin(url, e.headers["Location"])
+                continue
+            raise
+    raise RuntimeError(f"too many redirects: {url}")
+
+
 def _download(url, dst):
     """Streaming download with retries; writes .part first, then renames."""
     from urllib.parse import quote
@@ -62,10 +82,7 @@ def _download(url, dst):
     for attempt in range(3):
         try:
             # hf-mirror 403-blocks urllib's default UA; pretend to be a browser
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
-                                            "AppleWebKit/537.36 Chrome/120 Safari/537.36"})
-            with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            with _open(url) as r, open(tmp, "wb") as f:
                 total = int(r.headers.get("Content-Length") or 0)
                 done = 0
                 while True:
