@@ -2,7 +2,7 @@
 
 English | [中文](README_CN.md)
 
-16 interactive Jupyter notebook demos running on the **Rockchip RK1828 AI
+17 interactive Jupyter notebook demos running on the **Rockchip RK1828 AI
 coprocessor** (PCIe, 20 TOPS NPU), covering vision, speech and multimodal
 models. All models are in **RKNN3 format** (weight-separated: `.rknn` graph +
 `.weight` weights) and have been verified end-to-end on real RK1828 hardware.
@@ -98,29 +98,30 @@ bash download_models.sh hf         # Hugging Face official
 | 01 | 01_classification | MobileNetV2 / ResNet50-v2 (i8/fp16) | Image classification (Python inference) |
 | 02 | 02_yolo_detection | YOLOv5/v6/v8, YOLO26 n/s/m | Object detection (Python inference) |
 | 03 | 03_FastSAM | FastSAM-s | Instance segmentation (Python inference) |
-| 04 | 04_yolo26_pose_segment | YOLO26-pose / YOLO26-seg | Pose estimation + segmentation |
-| 05 | 05_RAFT_Stereo | RAFT-Stereo realtime | Stereo disparity |
-| 06 | 06_DepthAnythingV3 | Depth Anything V3 (base) | Multi-view depth estimation |
-| 07 | 07_QAClip | Chinese-CLIP | Chinese image-text matching |
-| 08 | 08_Qwen3_VL | Qwen3-VL-2B / 4B | Vision-language model |
-| 09 | 09_Qwen3_ASR | Qwen3-ASR-0.6B | Speech recognition (52 languages) |
-| 10 | 10_whisper | whisper-base | Speech recognition (zh/en) |
-| 11 | 11_paraformer | Paraformer | Chinese ASR (hotwords) |
-| 12 | 12_sensevoice | SenseVoice-Small | Multilingual ASR (emotion/event tags) |
-| 13 | 13_forced_aligner | Qwen3-ForcedAligner-0.6B | Forced alignment (word timestamps) |
-| 14 | 14_vits_tts | VITS (LJSpeech / VCTK) | English text-to-speech |
-| 15 | 15_Qwen3_Embedding | Qwen3-Embedding-0.6B | Text embeddings (RAG retrieval) |
-| 16 | 16_Qwen3_Reranker | Qwen3-Reranker-0.6B | Document reranking (RAG) |
+| 04 | 04_yolo26_pose | YOLO26-pose n/s/m | Pose estimation, 17 keypoints (Python inference) |
+| 05 | 05_yolo26_segment | YOLO26-seg n/s/m | Instance segmentation (Python inference) |
+| 06 | 06_RAFT_Stereo | RAFT-Stereo realtime | Stereo disparity |
+| 07 | 07_DepthAnythingV3 | Depth Anything V3 (base) | Multi-view depth estimation |
+| 08 | 08_QAClip | Chinese-CLIP | Chinese image-text matching |
+| 09 | 09_Qwen3_VL | Qwen3-VL-2B / 4B | Vision-language model |
+| 10 | 10_Qwen3_ASR | Qwen3-ASR-0.6B | Speech recognition (52 languages) |
+| 11 | 11_whisper | whisper-base | Speech recognition (zh/en) |
+| 12 | 12_paraformer | Paraformer | Chinese ASR (hotwords) |
+| 13 | 13_sensevoice | SenseVoice-Small | Multilingual ASR (emotion/event tags) |
+| 14 | 14_forced_aligner | Qwen3-ForcedAligner-0.6B | Forced alignment (word timestamps) |
+| 15 | 15_vits_tts | VITS (LJSpeech / VCTK) | English text-to-speech |
+| 16 | 16_Qwen3_Embedding | Qwen3-Embedding-0.6B | Text embeddings (RAG retrieval) |
+| 17 | 17_Qwen3_Reranker | Qwen3-Reranker-0.6B | Document reranking (RAG) |
 
-Notebooks 01-03 call the runtime directly from Python (`rknn3.py`, a ctypes
+Notebooks 01-05 call the runtime directly from Python (`rknn3.py`, a ctypes
 wrapper) and walk through pre-processing / inference / post-processing step by
-step; 04-16 drive prebuilt x86_64 C++ demos from the official
+step; 06-17 drive prebuilt x86_64 C++ demos from the official
 `rknn3-model-zoo` pipelines.
 
 ## Repository layout
 
 ```
-├── 01_classification.ipynb ... 16_Qwen3_Reranker.ipynb
+├── 01_classification.ipynb ... 17_Qwen3_Reranker.ipynb
 ├── rknn3.py            # ctypes wrapper of librknn3_api.so (Rknn3Model)
 ├── nb_download.py      # model download (HF / HF-Mirror picker, skip existing)
 ├── nb_demo.py          # C++ demo runner / result display helpers

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-在 **Rockchip RK1828 AI 协处理器**（PCIe，20 TOPS NPU）上运行的 16 个交互式
+在 **Rockchip RK1828 AI 协处理器**（PCIe，20 TOPS NPU）上运行的 17 个交互式
 Jupyter notebook demo，覆盖视觉、语音和多模态模型。所有模型均为 **RKNN3 格式**
 （`.rknn` 计算图 + `.weight` 权重分离），已在真实 RK1828 硬件上逐个验证，开箱即跑。
 
@@ -91,27 +91,28 @@ bash download_models.sh hf         # Hugging Face 官方源
 | 01 | 01_classification | MobileNetV2 / ResNet50-v2 (i8/fp16) | 图像分类（Python 推理） |
 | 02 | 02_yolo_detection | YOLOv5/v6/v8, YOLO26 n/s/m | 目标检测（Python 推理） |
 | 03 | 03_FastSAM | FastSAM-s | 实例分割（Python 推理） |
-| 04 | 04_yolo26_pose_segment | YOLO26-pose / YOLO26-seg | 姿态估计 + 分割 |
-| 05 | 05_RAFT_Stereo | RAFT-Stereo realtime | 双目视差 |
-| 06 | 06_DepthAnythingV3 | Depth Anything V3 (base) | 多视角深度估计 |
-| 07 | 07_QAClip | Chinese-CLIP | 中文图文匹配 |
-| 08 | 08_Qwen3_VL | Qwen3-VL-2B / 4B | 视觉语言大模型 |
-| 09 | 09_Qwen3_ASR | Qwen3-ASR-0.6B | 语音识别（52 语种） |
-| 10 | 10_whisper | whisper-base | 语音识别（中英文） |
-| 11 | 11_paraformer | Paraformer | 中文 ASR（热词） |
-| 12 | 12_sensevoice | SenseVoice-Small | 多语言 ASR（情感/事件标签） |
-| 13 | 13_forced_aligner | Qwen3-ForcedAligner-0.6B | 强制对齐（字级时间戳） |
-| 14 | 14_vits_tts | VITS (LJSpeech / VCTK) | 英文语音合成 |
-| 15 | 15_Qwen3_Embedding | Qwen3-Embedding-0.6B | 文本向量（RAG 检索） |
-| 16 | 16_Qwen3_Reranker | Qwen3-Reranker-0.6B | 文档重排序（RAG 精排） |
+| 04 | 04_yolo26_pose | YOLO26-pose n/s/m | 姿态估计 17 关键点（Python 推理） |
+| 05 | 05_yolo26_segment | YOLO26-seg n/s/m | 实例分割（Python 推理） |
+| 06 | 06_RAFT_Stereo | RAFT-Stereo realtime | 双目视差 |
+| 07 | 07_DepthAnythingV3 | Depth Anything V3 (base) | 多视角深度估计 |
+| 08 | 08_QAClip | Chinese-CLIP | 中文图文匹配 |
+| 09 | 09_Qwen3_VL | Qwen3-VL-2B / 4B | 视觉语言大模型 |
+| 10 | 10_Qwen3_ASR | Qwen3-ASR-0.6B | 语音识别（52 语种） |
+| 11 | 11_whisper | whisper-base | 语音识别（中英文） |
+| 12 | 12_paraformer | Paraformer | 中文 ASR（热词） |
+| 13 | 13_sensevoice | SenseVoice-Small | 多语言 ASR（情感/事件标签） |
+| 14 | 14_forced_aligner | Qwen3-ForcedAligner-0.6B | 强制对齐（字级时间戳） |
+| 15 | 15_vits_tts | VITS (LJSpeech / VCTK) | 英文语音合成 |
+| 16 | 16_Qwen3_Embedding | Qwen3-Embedding-0.6B | 文本向量（RAG 检索） |
+| 17 | 17_Qwen3_Reranker | Qwen3-Reranker-0.6B | 文档重排序（RAG 精排） |
 
-01-03 用 Python 直接调用运行时（`rknn3.py`，ctypes 封装），逐步展示
-前处理/推理/后处理；04-16 调用官方 `rknn3-model-zoo` 流程编译的 x86_64 C++ demo。
+01-05 用 Python 直接调用运行时（`rknn3.py`，ctypes 封装），逐步展示
+前处理/推理/后处理；06-17 调用官方 `rknn3-model-zoo` 流程编译的 x86_64 C++ demo。
 
 ## 目录结构
 
 ```
-├── 01_classification.ipynb ... 16_Qwen3_Reranker.ipynb
+├── 01_classification.ipynb ... 17_Qwen3_Reranker.ipynb
 ├── rknn3.py            # librknn3_api.so 的 ctypes 封装（Rknn3Model）
 ├── nb_download.py      # 模型下载（HF / HF-Mirror 源选择，跳过已存在）
 ├── nb_demo.py          # C++ demo 运行/结果展示辅助

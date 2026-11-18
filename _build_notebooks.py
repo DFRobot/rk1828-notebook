@@ -856,96 +856,327 @@ def cpp_intro(title, body):
     return md(f"# {title}\n\n{body}")
 
 
-# ================================================================ 04 姿态/分割
+# ================================================================ 04 YOLO26 姿态
 
 def build_04():
-    pose_files = repo_files("yolo26-pose-rknn3-rk1828", "demos/yolo26_pose")
-    seg_files = repo_files("yolo26-segment-rknn3-rk1828", "demos/yolo26_segment")
-    files = pose_files + seg_files
-    cells = [
-        cpp_intro("RK1828 YOLO26 姿态估计 & 实例分割 Demo",
-                  """
-两个基于 **YOLO26** 的下游任务，都是官方 `rknn3-model-zoo` 的预编译 C++ demo：
+    repo = "yolo26-pose-rknn3-rk1828"
+    files = []
+    for m, quants in (("n", ("i8", "fp16")), ("s", ("i8", "fp16")), ("m", ("i8",))):
+        for q in quants:
+            for ext in ("rknn", "weight"):
+                files.append((repo, f"model/yolo26{m}-pose_{q}.{ext}",
+                              f"models/yolo26_pose/yolo26{m}-pose_{q}.{ext}"))
+    files.append((repo, "model/little_boy.jpg", "datasets/little_boy.jpg"))
 
-- **姿态估计**（pose）：检测人体 + 17 个关键点（n/s/m 三个规格，i8/fp16 两种量化；
-  例外：**m 规格只有 i8**——官方 SDK 包里的 m-pose fp16 权重是损坏的，实为 .rknn 文件的副本，故未收录）
-- **实例分割**（segment）：检测框 + 像素级掩码（n/s/m，i8/fp16）
+    cells = [
+        md("""
+# RK1828 YOLO26-pose 人体姿态估计 Demo
+
+Ultralytics **YOLO26-pose**：检测人体并回归 **17 个关键点**（鼻/眼/耳/肩/肘/腕/髋/膝/踝）。
+端到端无 NMS 设计（host 端仍做一次轻量 NMS 去重），9 个输出头：
+
+| 输出头 | 形状（stride 8/16/32 各一组） | 含义 |
+|---|---|---|
+| `box_*` | `[1,4,80,80]` `[1,4,40,40]` `[1,4,20,20]` | 框回归 (l,t,r,b)，无 DFL |
+| `score_*` | `[1,1,…]` | 人体置信度（单类别 person） |
+| `pos_*` | `[1,51,…]` | 17 关键点 × 3（x, y, 置信度 logit） |
 
 | 步骤 | 内容 |
 |---|---|
-| 1 | 下载模型和 demo 程序（可选 HF / HF-Mirror 源） |
-| 2 | 解压预编译 demo |
-| 3 | 姿态估计 |
-| 4 | 实例分割 |
+| 1 | 下载模型（可选 HF / HF-Mirror 源） |
+| 2 | 选择模型和图片 |
+| 3 | 前处理（letterbox 等比缩放 + 灰边填充） |
+| 4 | RKNN 推理 |
+| 5 | 后处理（框 + 关键点解码 + NMS） |
+| 6 | 骨架可视化 |
+
+> 规格说明：**n/s 有 i8 和 fp16 两版；m 只有 i8**——官方 SDK 包里的
+> m-pose fp16 权重文件损坏（实为 .rknn 的副本），未收录。
+> 参考成绩：yolo26m-pose i8 约 158ms/帧，示例图人体置信度 0.93。
 """),
         ENV_MD, ENV_CODE,
     ]
-    cells += download_cells(files)
-    cells += extract_cells(["demos/yolo26_pose", "demos/yolo26_segment"])
+    cells += download_cells(
+        files,
+        intro="本 demo 下载 YOLO26-pose n/s/m 模型（m 仅 i8）和示例图 little_boy.jpg。")
     cells += [
-        run_helper_code(),
         md("""
-## 3. 姿态估计（17 关键点）
-
-参考成绩：yolo26m-pose i8 约 152ms/帧，示例图上人体置信度 0.93。
+## 2. 选择模型和图片
 """),
         code("""
+import glob
 import ipywidgets as widgets
 from IPython.display import display
 
-w_size = widgets.Dropdown(options=["n", "s", "m"], value="m", description="规格:")
-w_quant = widgets.Dropdown(options=["i8", "fp16"], description="量化:")
-display(w_size, w_quant)
+w_model = widgets.Dropdown(
+    options=[("yolo26n-pose i8", "yolo26n-pose_i8"),
+             ("yolo26n-pose fp16", "yolo26n-pose_fp16"),
+             ("yolo26s-pose i8", "yolo26s-pose_i8"),
+             ("yolo26s-pose fp16", "yolo26s-pose_fp16"),
+             ("yolo26m-pose i8（仅此版）", "yolo26m-pose_i8")],
+    value="yolo26m-pose_i8", description="模型:")
+w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
+                           description="图片:", layout=widgets.Layout(width="60%"))
+if any(o.endswith("/little_boy.jpg") for o in w_image.options):
+    w_image.value = [o for o in w_image.options if o.endswith("/little_boy.jpg")][0]
+display(w_model, w_image)
 print("选好后继续往下运行 ▼")
-"""),
-        code("""
-import os
-
-DEMO = "demos/yolo26_pose"
-m = f"yolo26{w_size.value}-pose_{w_quant.value}"
-if not os.path.exists(f"{DEMO}/model/{m}.weight"):
-    print(f"⚠️ {m} 不存在：m 规格的 fp16 权重在官方 SDK 中损坏，请改用 i8 或 n/s 规格")
-else:
-    before = snapshot(DEMO)
-    run_demo([f"./rknn_yolo26_pose_demo", f"model/{m}.rknn", f"model/{m}.weight",
-              "model/little_boy.jpg", "0x1"], DEMO)
-    show_new_images(DEMO, before)
 """),
         md("""
-## 4. 实例分割（检测框 + 像素掩码）
+## 3. 前处理：letterbox
 
-参考成绩：yolo26m-seg i8 约 261ms/帧，COCO 示例图检出 4 个人 + 1 辆巴士。
+YOLO 要求 640×640 正方形输入。直接拉伸会改变人体比例，所以**等比缩放后灰边填充**，
+并记下缩放比例和 padding —— 后处理时要用它们把框和关键点还原回原图坐标。
 """),
         code("""
-import ipywidgets as widgets
-from IPython.display import display
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+from vision_post import letterbox, to_input_array, setup_cjk_font
 
-w_size2 = widgets.Dropdown(options=["n", "s", "m"], value="m", description="规格:")
-w_quant2 = widgets.Dropdown(options=["i8", "fp16"], description="量化:")
-display(w_size2, w_quant2)
-print("选好后继续往下运行 ▼")
+setup_cjk_font()
+img = Image.open(w_image.value).convert("RGB")
+img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
+x = to_input_array(img_lb)
+print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+
+# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+for ax, im, title in [
+    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
+    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+]:
+    ax.imshow(np.asarray(im))
+    ax.set_title(title)
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
+"""),
+        md("""
+## 4. RKNN 推理
 """),
         code("""
-DEMO = "demos/yolo26_segment"
-m = f"yolo26{w_size2.value}-seg_{w_quant2.value}"
-before = snapshot(DEMO)
-run_demo([f"./rknn_yolo26_segment_demo", f"model/{m}.rknn", f"model/{m}.weight",
-          "model/bus.jpg", "0x1"], DEMO)
-show_new_images(DEMO, before)
+import time
+from rknn3 import Rknn3Model
+
+model = Rknn3Model(f"models/yolo26_pose/{w_model.value}.rknn")
+print(f"{len(model.output_attrs)} 个输出头:")
+for a in model.output_attrs:
+    print("  ", a)
+
+_ = model.infer([x])
+t0 = time.time()
+outputs = model.infer([x])
+print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+"""),
+        md("""
+## 5. 后处理：框 + 关键点解码
+
+- 每个网格：box 头给出 (l,t,r,b) 距离，score 头给出人体置信度
+- 关键点：`x = (raw_x + 网格x + 0.5) × stride`，置信度再过 sigmoid
+- 全部网格收集后做一次 NMS，再把坐标从 letterbox 系还原回原图
+"""),
+        code("""
+from vision_post import (decode_yolo26_pose, unletterbox_boxes,
+                         unletterbox_keypoints)
+
+boxes, scores, keypoints = decode_yolo26_pose(outputs, model.output_attrs,
+                                              conf_thresh=0.4)
+boxes = unletterbox_boxes(boxes, SCALE, PAD_X, PAD_Y, *img.size)
+keypoints = unletterbox_keypoints(keypoints, SCALE, PAD_X, PAD_Y)
+
+print(f"检测到 {len(boxes)} 个人:")
+for b, s, k in zip(boxes, scores, keypoints):
+    vis = (k[:, 2] >= 0.5).sum()
+    print(f"  person {s:.2f}  box=({b[0]:.0f},{b[1]:.0f},{b[2]:.0f},{b[3]:.0f})"
+          f"  可见关键点 {vis}/17")
+"""),
+        md("""
+## 6. 骨架可视化
+
+COCO 17 关键点按骨架连线（肩-肘-腕、髋-膝-踝等），白点 = 置信度 ≥ 0.5 的关键点。
+"""),
+        code("""
+from vision_post import draw_pose
+
+result = draw_pose(img, boxes, scores, keypoints)
+model.close()
+result
 """),
         md("""
 ## 小结
 
-- 两个 demo 的模型都是**全套官方转换产物**，后处理（含 NMS）由 C++ demo 完成。
-- 可换 n/s（更小更快）规格对比精度与耗时。
+- YOLO26-pose 的关键点和框在同一个前向里输出（`pos_*` 头 51 通道 = 17 点 × 3），
+  不需要单独的 pose 模型二次推理。
+- 解码逻辑在 `vision_post.decode_yolo26_pose` / `unletterbox_keypoints`，
+  画图在 `vision_post.draw_pose`（`COCO_SKELETON` 定义了 17 条骨架连线）。
+- 可以换 n/s 规格对比速度，或换多人照片看骨架串联效果。
 """),
     ]
     return notebook(cells)
 
 
-# ================================================================ 05 RAFT 双目
+# ================================================================ 05 YOLO26 分割
 
 def build_05():
+    repo = "yolo26-segment-rknn3-rk1828"
+    files = []
+    for m in ("n", "s", "m"):
+        for q in ("i8", "fp16"):
+            for ext in ("rknn", "weight"):
+                files.append((repo, f"model/yolo26{m}-seg_{q}.{ext}",
+                              f"models/yolo26_seg/yolo26{m}-seg_{q}.{ext}"))
+    files.append((repo, "model/coco_80_labels_list.txt",
+                  "datasets/coco_80_labels_list.txt"))
+    files.append((repo, "model/bus.jpg", "datasets/bus.jpg"))
+
+    cells = [
+        md("""
+# RK1828 YOLO26-seg 实例分割 Demo
+
+Ultralytics **YOLO26-seg**：检测框 + 80 类分类 + **像素级实例掩码**，10 个输出头：
+
+| 输出头 | 形状 | 含义 |
+|---|---|---|
+| `box_*` ×3 | `[1,4,80,80]` `[1,4,40,40]` `[1,4,20,20]` | 框回归 (l,t,r,b) |
+| `score_*` ×3 | `[1,80,…]` | 80 类置信度 |
+| `mask 系数` ×3 | `[1,32,…]` | 每个候选的 32 维掩码系数 |
+| `proto` | `[1,32,160,160]` | 掩码基（prototypes） |
+
+实例掩码 = `sigmoid(32 维系数 · proto)`，再按检测框裁剪、还原到原图。
+（和 03 FastSAM 同一套思路，只是多了 80 类分类。）
+
+| 步骤 | 内容 |
+|---|---|
+| 1 | 下载模型（可选 HF / HF-Mirror 源） |
+| 2 | 选择模型和图片 |
+| 3 | 前处理（letterbox 等比缩放 + 灰边填充） |
+| 4 | RKNN 推理 |
+| 5 | 后处理（解码 + NMS + 掩码合成） |
+| 6 | 可视化 |
+
+> 参考成绩：yolo26m-seg i8 约 250ms/帧，示例图检出 4 个人 + 1 辆巴士。
+"""),
+        ENV_MD, ENV_CODE,
+    ]
+    cells += download_cells(
+        files,
+        intro="本 demo 下载 YOLO26-seg n/s/m（各 i8/fp16 两版）、COCO 标签和示例图 bus.jpg。")
+    cells += [
+        md("""
+## 2. 选择模型和图片
+"""),
+        code("""
+import glob
+import ipywidgets as widgets
+from IPython.display import display
+
+w_model = widgets.Dropdown(
+    options=[f"yolo26{m}-seg_{q}" for m in ("n", "s", "m") for q in ("i8", "fp16")],
+    value="yolo26m-seg_i8", description="模型:")
+w_image = widgets.Dropdown(options=sorted(glob.glob("datasets/*.jpg")),
+                           description="图片:", layout=widgets.Layout(width="60%"))
+if any(o.endswith("/bus.jpg") for o in w_image.options):
+    w_image.value = [o for o in w_image.options if o.endswith("/bus.jpg")][0]
+display(w_model, w_image)
+
+LABELS = open("datasets/coco_80_labels_list.txt").read().splitlines()
+print(f"{len(LABELS)} 个 COCO 类别。选好后继续往下运行 ▼")
+"""),
+        md("""
+## 3. 前处理：letterbox
+
+等比缩放 + 灰边填充到 640×640，记下缩放比例和 padding 供坐标还原。
+"""),
+        code("""
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+from vision_post import letterbox, to_input_array, setup_cjk_font
+
+setup_cjk_font()
+img = Image.open(w_image.value).convert("RGB")
+img_lb, SCALE, PAD_X, PAD_Y = letterbox(img, 640)
+x = to_input_array(img_lb)
+print(f"原图 {img.size} -> 输入 {x.shape}, scale={SCALE:.3f}, pad=({PAD_X},{PAD_Y})")
+
+# 前处理每个阶段都画出来：原图 -> letterbox -> 输入张量
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+for ax, im, title in [
+    (axes[0], img, f"1. 原图 {img.size[0]}x{img.size[1]}"),
+    (axes[1], img_lb, "2. letterbox 640x640\\n(等比缩放 + 灰边填充)"),
+    (axes[2], x[0], f"3. 模型输入 {x.shape}\\nuint8 NHWC"),
+]:
+    ax.imshow(np.asarray(im))
+    ax.set_title(title)
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
+"""),
+        md("""
+## 4. RKNN 推理
+"""),
+        code("""
+import time
+from rknn3 import Rknn3Model
+
+model = Rknn3Model(f"models/yolo26_seg/{w_model.value}.rknn")
+print(f"{len(model.output_attrs)} 个输出头:")
+for a in model.output_attrs:
+    print("  ", a)
+
+_ = model.infer([x])
+t0 = time.time()
+outputs = model.infer([x])
+print(f"推理耗时: {(time.time()-t0)*1000:.1f} ms")
+"""),
+        md("""
+## 5. 后处理：解码 + NMS + 掩码合成
+
+1. 每个网格解码框和 80 类置信度，收集该网格的 32 维掩码系数
+2. 按类 NMS 去重
+3. `sigmoid(系数 · proto)` 得到 160×160 掩码 → 放大到输入尺寸、按框裁剪 → 还原回原图
+"""),
+        code("""
+from vision_post import (decode_yolo26_seg, scale_masks, unletterbox_boxes)
+
+boxes, classes, scores, masks = decode_yolo26_seg(outputs, model.output_attrs,
+                                                  conf_thresh=0.4)
+masks_full = scale_masks(masks, boxes, (img.height, img.width), SCALE, PAD_X, PAD_Y)
+boxes = unletterbox_boxes(boxes, SCALE, PAD_X, PAD_Y, *img.size)
+
+print(f"检测到 {len(boxes)} 个目标:")
+for b, c, s in zip(boxes, classes, scores):
+    print(f"  {LABELS[c]:12s} {s:.2f}  box=({b[0]:.0f},{b[1]:.0f},{b[2]:.0f},{b[3]:.0f})")
+"""),
+        md("""
+## 6. 可视化：掩码叠加 + 检测框
+"""),
+        code("""
+from vision_post import draw_boxes, draw_masks
+
+overlay = draw_masks(img, masks_full)
+result = draw_boxes(overlay, boxes, classes, scores, LABELS)
+model.close()
+result
+"""),
+        md("""
+## 小结
+
+- 掩码合成 `sigmoid(系数 · proto)` 是 YOLOv8-seg / FastSAM / YOLO26-seg 的通用做法，
+  proto 只需算一次，所有实例共享。
+- 解码在 `vision_post.decode_yolo26_seg`，掩码映射在 `vision_post.scale_masks`。
+- 与 03 FastSAM 对比：FastSAM 类别无关（segment everything），YOLO26-seg 输出 80 类。
+"""),
+    ]
+    return notebook(cells)
+
+
+
+# ================================================================ 06 RAFT 双目
+
+def build_06():
     files = repo_files("raft-stereo-rknn3-rk1828", "demos/raft_stereo")
     cells = [
         cpp_intro("RK1828 RAFT-Stereo 双目视差 Demo",
@@ -995,9 +1226,9 @@ show_new_images(DEMO, before)
     return notebook(cells)
 
 
-# ================================================================ 06 DA3 深度
+# ================================================================ 07 DA3 深度
 
-def build_06():
+def build_07():
     files = repo_files("depth-anything-v3-rknn3-rk1828", "demos/depth_anything_v3")
     cells = [
         cpp_intro("RK1828 Depth Anything V3 多视角深度估计 Demo",
@@ -1064,7 +1295,7 @@ show_images(depth_imgs[:5], max_width=320)
 
 # ================================================================ 07 Chinese-CLIP
 
-def build_07():
+def build_08():
     files = repo_files("chinese-clip-rknn3-rk1828", "demos/chinese_clip")
     cells = [
         cpp_intro("RK1828 Chinese-CLIP 图文匹配 Demo",
@@ -1113,7 +1344,7 @@ run_demo(["./rknn_qaclipvit_demo",
 
 # ================================================================ 08 Qwen3-VL
 
-def build_08():
+def build_09():
     files_2b = repo_files("qwen3-vl-2b-rknn3-rk1828", "demos/qwen3_vl_2b")
     files_4b = repo_files("qwen3-vl-4b-rknn3-rk1828", "demos/qwen3_vl_4b")
     files = files_2b + files_4b
@@ -1181,7 +1412,7 @@ run_demo(["./rknn_qwen3_vl_demo",
 
 # ================================================================ 09 Qwen3-ASR
 
-def build_09():
+def build_10():
     files = repo_files("qwen3-asr-rknn3-rk1828", "demos/qwen3_asr") + ASR_WAVS
     cells = [
         cpp_intro("RK1828 Qwen3-ASR 语音识别 Demo",
@@ -1241,7 +1472,7 @@ run_demo(["./rknn_qwen3_asr_demo",
 
 # ================================================================ 10 Whisper
 
-def build_10():
+def build_11():
     files = repo_files("whisper-base-rknn3-rk1828", "demos/whisper_base") + ASR_WAVS
     cells = [
         cpp_intro("RK1828 Whisper-base 语音识别 Demo",
@@ -1310,7 +1541,7 @@ run_demo(["./rknn_whisper_raw_demo",
 
 # ================================================================ 11 Paraformer
 
-def build_11():
+def build_12():
     files = repo_files("paraformer-rknn3-rk1828", "demos/paraformer") + ASR_WAVS
     cells = [
         cpp_intro("RK1828 Paraformer 中文语音识别 Demo（带热词）",
@@ -1392,7 +1623,7 @@ else:
 
 # ================================================================ 12 SenseVoice
 
-def build_12():
+def build_13():
     files = repo_files("sensevoice-small-rknn3-rk1828", "demos/sensevoice") + ASR_WAVS
     cells = [
         cpp_intro("RK1828 SenseVoice-Small 多语言语音识别 Demo",
@@ -1444,7 +1675,7 @@ run_demo(["./rknn_sensevoice_demo",
 
 # ================================================================ 13 强制对齐
 
-def build_13():
+def build_14():
     files = repo_files("qwen3-forced-aligner-rknn3-rk1828", "demos/forced_aligner")
     cells = [
         cpp_intro("RK1828 Qwen3-ForcedAligner 强制对齐 Demo",
@@ -1541,9 +1772,9 @@ plt.show()
     return notebook(cells)
 
 
-# ================================================================ 14 VITS TTS
+# ================================================================ 15 VITS TTS
 
-def build_14():
+def build_15():
     files = repo_files("vits-tts-rknn3-rk1828", "demos/vits_tts")
     cells = [
         cpp_intro("RK1828 VITS 语音合成 Demo",
@@ -1622,7 +1853,7 @@ show_audio("demos/vits_tts/out.wav")
 
 # ================================================================ 15 Embedding
 
-def build_15():
+def build_16():
     files = repo_files("qwen3-embedding-0.6b-rknn3-rk1828", "demos/qwen3_embedding")
     cells = [
         cpp_intro("RK1828 Qwen3-Embedding 文本向量 Demo",
@@ -1714,7 +1945,7 @@ plt.show()
 
 # ================================================================ 16 Reranker
 
-def build_16():
+def build_17():
     files = repo_files("qwen3-reranker-0.6b-rknn3-rk1828", "demos/qwen3_reranker")
     cells = [
         cpp_intro("RK1828 Qwen3-Reranker 文档重排序 Demo",
@@ -1810,19 +2041,20 @@ BUILDERS = {
     "01_classification.ipynb": build_01,
     "02_yolo_detection.ipynb": build_02,
     "03_FastSAM.ipynb": build_03,
-    "04_yolo26_pose_segment.ipynb": build_04,
-    "05_RAFT_Stereo.ipynb": build_05,
-    "06_DepthAnythingV3.ipynb": build_06,
-    "07_QAClip.ipynb": build_07,
-    "08_Qwen3_VL.ipynb": build_08,
-    "09_Qwen3_ASR.ipynb": build_09,
-    "10_whisper.ipynb": build_10,
-    "11_paraformer.ipynb": build_11,
-    "12_sensevoice.ipynb": build_12,
-    "13_forced_aligner.ipynb": build_13,
-    "14_vits_tts.ipynb": build_14,
-    "15_Qwen3_Embedding.ipynb": build_15,
-    "16_Qwen3_Reranker.ipynb": build_16,
+    "04_yolo26_pose.ipynb": build_04,
+    "05_yolo26_segment.ipynb": build_05,
+    "06_RAFT_Stereo.ipynb": build_06,
+    "07_DepthAnythingV3.ipynb": build_07,
+    "08_QAClip.ipynb": build_08,
+    "09_Qwen3_VL.ipynb": build_09,
+    "10_Qwen3_ASR.ipynb": build_10,
+    "11_whisper.ipynb": build_11,
+    "12_paraformer.ipynb": build_12,
+    "13_sensevoice.ipynb": build_13,
+    "14_forced_aligner.ipynb": build_14,
+    "15_vits_tts.ipynb": build_15,
+    "16_Qwen3_Embedding.ipynb": build_16,
+    "17_Qwen3_Reranker.ipynb": build_17,
 }
 
 

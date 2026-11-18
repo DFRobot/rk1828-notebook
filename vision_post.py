@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """视觉模型（YOLO 系列 / FastSAM）的通用前后处理。
 
-notebook 01-03 共用。所有函数都是纯 numpy/PIL 实现。
+notebook 01-05 共用。所有函数都是纯 numpy/PIL 实现。
 """
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -101,6 +101,33 @@ def unletterbox_boxes(boxes, scale, pad_x, pad_y, orig_w, orig_h):
 
 # ---------------------------------------------------------------- YOLO 解码
 
+def _group_heads(outputs, output_attrs):
+    """把 YOLO26 的多个输出头按网格大小分组: {grid_h: {channels: array[c,h,w]}}。"""
+    branches = {}
+    for arr, attr in zip(outputs, output_attrs):
+        a = dequant(arr, attr)
+        if a.ndim == 4 and a.shape[0] == 1:
+            a = a[0]
+        c, h, w = a.shape
+        branches.setdefault(h, {})[c] = a
+    return branches
+
+
+def _decode_boxes_ltrb(box_head):
+    """YOLO26 直接回归 (l,t,r,b)（无 DFL），还原为输入坐标系 xyxy [h*w,4]。"""
+    gh, gw = box_head.shape[1], box_head.shape[2]
+    stride = 640 // gh
+    row, col = np.meshgrid(np.arange(gh), np.arange(gw), indexing="ij")
+    x1 = (-box_head[0] + col + 0.5) * stride
+    y1 = (-box_head[1] + row + 0.5) * stride
+    x2 = (box_head[2] + col + 0.5) * stride
+    y2 = (box_head[3] + row + 0.5) * stride
+    return np.stack([x1, y1, x2, y2], -1).reshape(-1, 4)
+
+
+def _sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -60, 60)))
+
 def decode_builtin_nms(output, conf_thresh=0.4):
     """YOLOv5/v6/v8：模型内置 decode+NMS，输出 [1,K,6] = (score, class, x1, y1, x2, y2)。
 
@@ -168,6 +195,113 @@ def decode_yolo26_heads(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
     return boxes[keep], classes[keep], scores[keep]
 
 
+def decode_yolo26_pose(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
+                       num_keypoints=17):
+    """YOLO26-pose：每个分支 box[1,4,h,w] + score[1,1,h,w] + kpt[1,K*3,h,w]。
+
+    返回 (boxes[K,4] xyxy, scores[K], keypoints[K,17,3])（模型输入坐标系）；
+    keypoints[...,2] 是 sigmoid 后的关键点置信度。pose 只检测 person 单类别。
+    """
+    kc = num_keypoints * 3
+    branches = _group_heads(outputs, output_attrs)
+    all_boxes, all_scores, all_kpts = [], [], []
+    for h in sorted(branches, reverse=True):
+        pair = branches[h]
+        if 4 not in pair or 1 not in pair or kc not in pair:
+            continue
+        box_head, score_head, kpt_head = pair[4], pair[1], pair[kc]
+        gh, gw = box_head.shape[1], box_head.shape[2]
+        stride = 640 // gh
+        row, col = np.meshgrid(np.arange(gh), np.arange(gw), indexing="ij")
+
+        boxes = _decode_boxes_ltrb(box_head)
+        prob = score_head[0]
+        if prob.min() < 0 or prob.max() > 1:  # logits -> 概率
+            prob = _sigmoid(prob)
+        keep = prob.ravel() >= conf_thresh
+
+        # 关键点: 通道 3k/3k+1 为相对网格中心的偏移，3k+2 为置信度 logit
+        kx = (kpt_head[0::3] + col + 0.5) * stride            # [17,h,w]
+        ky = (kpt_head[1::3] + row + 0.5) * stride
+        kp = _sigmoid(kpt_head[2::3])
+        kpts = np.stack([kx, ky, kp], -1)                     # [17,h,w,3]
+        kpts = kpts.transpose(1, 2, 0, 3).reshape(-1, num_keypoints, 3)
+
+        all_boxes.append(boxes[keep])
+        all_scores.append(prob.ravel()[keep])
+        all_kpts.append(kpts[keep])
+
+    if not all_boxes:
+        return (np.zeros((0, 4)), np.zeros(0),
+                np.zeros((0, num_keypoints, 3)))
+    boxes = np.concatenate(all_boxes)
+    scores = np.concatenate(all_scores)
+    kpts = np.concatenate(all_kpts)
+    keep = nms(boxes, scores, nms_thresh)
+    return boxes[keep], scores[keep], kpts[keep]
+
+
+def decode_yolo26_seg(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
+                      num_classes=80, mask_dim=32):
+    """YOLO26-seg：每个分支 box[1,4,h,w] + score[1,80,h,w] + mask系数[1,32,h,w]，
+    外加一个 proto 头 [1,32,160,160]。
+
+    返回 (boxes[K,4], classes[K], scores[K], masks[K,160,160])（模型输入坐标系）。
+    """
+    branches = _group_heads(outputs, output_attrs)
+    proto = None
+    for h, pair in branches.items():
+        if mask_dim in pair and 4 not in pair:  # 只有 proto 头没有配对的 box 头
+            proto = pair[mask_dim]
+    if proto is None:
+        raise ValueError("未找到 mask proto 头 [1,32,160,160]")
+
+    all_boxes, all_scores, all_classes, all_coeffs = [], [], [], []
+    for h in sorted(branches, reverse=True):
+        pair = branches[h]
+        if 4 not in pair or num_classes not in pair or mask_dim not in pair:
+            continue
+        box_head, score_head, mask_head = pair[4], pair[num_classes], pair[mask_dim]
+
+        boxes = _decode_boxes_ltrb(box_head)
+        prob = score_head
+        if prob.min() < 0 or prob.max() > 1:  # logits -> 概率
+            prob = _sigmoid(prob)
+        prob = prob.transpose(1, 2, 0).reshape(-1, num_classes)
+        scores = prob.max(1)
+        classes = prob.argmax(1)
+        keep = scores >= conf_thresh
+
+        coeffs = mask_head.transpose(1, 2, 0).reshape(-1, mask_dim)
+        all_boxes.append(boxes[keep])
+        all_scores.append(scores[keep])
+        all_classes.append(classes[keep])
+        all_coeffs.append(coeffs[keep])
+
+    if not all_boxes:
+        return (np.zeros((0, 4)), np.zeros(0, np.int64), np.zeros(0),
+                np.zeros((0, *proto.shape[1:])))
+    boxes = np.concatenate(all_boxes)
+    scores = np.concatenate(all_scores)
+    classes = np.concatenate(all_classes)
+    coeffs = np.concatenate(all_coeffs)
+    keep = nms(boxes, scores, nms_thresh, classes)
+    boxes, scores, classes, coeffs = boxes[keep], scores[keep], classes[keep], coeffs[keep]
+
+    masks = _sigmoid(coeffs @ proto.reshape(mask_dim, -1))
+    masks = masks.reshape(len(boxes), *proto.shape[1:])  # [K,160,160]
+    return boxes, classes, scores, masks
+
+
+def unletterbox_keypoints(kpts, scale, pad_x, pad_y):
+    """关键点坐标从模型输入系映射回原图（kpts [...,3]，最后一维 x,y,conf）。"""
+    kpts = kpts.copy().astype(np.float32)
+    kpts[..., 0] = (kpts[..., 0] - pad_x) / scale
+    kpts[..., 1] = (kpts[..., 1] - pad_y) / scale
+    return kpts
+
+
+
 # ---------------------------------------------------------------- FastSAM 解码
 
 def decode_fastsam(outputs, conf_thresh=0.4, nms_thresh=0.7, mask_thresh=0.5):
@@ -226,6 +360,40 @@ def scale_masks(masks, boxes, out_shape, scale, pad_x, pad_y, input_size=640):
 
 _PALETTE = [(255, 56, 56), (255, 157, 51), (255, 225, 52), (87, 210, 60),
             (0, 210, 210), (62, 120, 255), (168, 62, 255), (255, 62, 168)]
+
+# COCO 17 关键点: 0鼻 1左眼 2右眼 3左耳 4右耳 5左肩 6右肩 7左肘 8右肘
+# 9左腕 10右腕 11左髋 12右髋 13左膝 14右膝 15左踝 16右踝
+COCO_SKELETON = [(0, 1), (0, 2), (1, 3), (2, 4), (0, 5), (0, 6),
+                 (5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12),
+                 (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)]
+
+
+def draw_pose(img, boxes, scores, keypoints, kpt_thresh=0.5):
+    """在 PIL.Image 上画人体框 + COCO 17 关键点骨架，返回新图。"""
+    img = img.copy()
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+    except Exception:  # noqa: BLE001
+        font = ImageFont.load_default()
+    for i, (box, score, kpts) in enumerate(zip(boxes, scores, keypoints)):
+        color = _PALETTE[i % len(_PALETTE)]
+        x1, y1, x2, y2 = [float(v) for v in box]
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+        text = f"person {score:.2f}"
+        tw = draw.textlength(text, font=font)
+        draw.rectangle([x1, y1 - 18, x1 + tw + 6, y1], fill=color)
+        draw.text((x1 + 3, y1 - 16), text, fill=(255, 255, 255), font=font)
+        for a, b in COCO_SKELETON:
+            if kpts[a, 2] >= kpt_thresh and kpts[b, 2] >= kpt_thresh:
+                draw.line([kpts[a, 0], kpts[a, 1], kpts[b, 0], kpts[b, 1]],
+                          fill=color, width=3)
+        for x, y, c in kpts:
+            if c >= kpt_thresh:
+                draw.ellipse([x - 3, y - 3, x + 3, y + 3],
+                             fill=(255, 255, 255), outline=color, width=2)
+    return img
 
 
 def draw_boxes(img, boxes, classes, scores, labels=None):
