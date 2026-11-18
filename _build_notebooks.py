@@ -1925,7 +1925,9 @@ print("向量矩阵:", embs.shape)
 """),
         code("""
 import matplotlib.pyplot as plt
+from vision_post import setup_cjk_font
 
+setup_cjk_font()
 norm = embs / np.linalg.norm(embs, axis=1, keepdims=True)
 sim = norm @ norm.T
 
@@ -2024,7 +2026,9 @@ for i in order:
 """),
         code("""
 import matplotlib.pyplot as plt
+from vision_post import setup_cjk_font
 
+setup_cjk_font()
 labels = [d[:28] for d in docs]
 order = np.argsort(scores)
 plt.figure(figsize=(8, 3.5))
