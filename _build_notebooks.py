@@ -259,7 +259,9 @@ for i in top5:
 """),
         code("""
 import matplotlib.pyplot as plt
+from vision_post import setup_cjk_font
 
+setup_cjk_font()
 fig, axes = plt.subplots(1, 2, figsize=(11, 3.2), gridspec_kw={"width_ratios": [1, 1.6]})
 axes[0].imshow(img)
 axes[0].set_title(f"{w_model.value} ({w_quant.value})")
@@ -412,11 +414,98 @@ model.close()
 result
 """),
         md("""
+## 7. 多模型对比
+
+同一张图、同一个量化版本（当前下拉框所选），把 **6 个模型全部跑一遍**，
+对比推理耗时、检测目标数和检测结果。每个模型计时 3 次取最快（排除首次预热抖动）。
+"""),
+        code("""
+import time
+from rknn3 import Rknn3Model
+from vision_post import (decode_builtin_nms, decode_yolo26_heads,
+                         unletterbox_boxes)
+
+ALL_MODELS = ["yolov5", "yolov6", "yolov8", "yolo26n", "yolo26s", "yolo26m"]
+quant = w_quant.value
+compare = []  # (model, latency_ms, boxes, classes, scores)
+for name in ALL_MODELS:
+    m = Rknn3Model(f"models/yolo/{name}/{quant}/{name}.rknn")
+    m.infer([x])  # 预热
+    best, outs = float("inf"), None
+    for _ in range(3):
+        t0 = time.time()
+        outs = m.infer([x])
+        best = min(best, (time.time() - t0) * 1000)
+    if name.startswith("yolo26"):
+        b, c, s = decode_yolo26_heads(outs, m.output_attrs, conf_thresh=0.4)
+    else:
+        b, c, s = decode_builtin_nms(outs[0], conf_thresh=0.4)
+    b = unletterbox_boxes(b, SCALE, PAD_X, PAD_Y, *img.size)
+    compare.append((name, best, b, c, s))
+    m.close()
+    print(f"{name:8s} {best:7.1f} ms  {len(b)} 个目标")
+"""),
+        md("""
+### 对比表格
+"""),
+        code("""
+from IPython.display import HTML
+
+rows = "".join(
+    f"<tr><td>{n}</td><td>{quant}</td>"
+    f"<td>{lat:.1f}</td><td>{len(b)}</td>"
+    f"<td>{', '.join(f'{LABELS[ci]}({si:.2f})' for ci, si in list(zip(c, s))[:5]) or '-'}</td></tr>"
+    for n, lat, b, c, s in compare)
+HTML("<table style='text-align:left'>"
+     "<tr><th>模型</th><th>量化</th><th>耗时(ms)</th><th>目标数</th><th>Top-5 检测</th></tr>"
+     + rows + "</table>")
+"""),
+        md("""
+### 耗时柱状图
+"""),
+        code("""
+import matplotlib.pyplot as plt
+from vision_post import setup_cjk_font
+
+setup_cjk_font()
+names = [n for n, *_ in compare]
+lats = [lat for _, lat, *_ in compare]
+counts = [len(b) for _, _, b, *_ in compare]
+
+fig, ax = plt.subplots(figsize=(8, 4))
+bars = ax.bar(names, lats, color="#3b82f6")
+for bar, lat, cnt in zip(bars, lats, counts):
+    ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+            f"{lat:.0f}ms\\n{cnt}个", ha="center", va="bottom", fontsize=9)
+ax.set_ylabel("推理耗时 (ms)")
+ax.set_title(f"YOLO 多模型对比（{quant}，同一张图）")
+ax.set_ylim(0, max(lats) * 1.25)
+plt.tight_layout()
+plt.show()
+"""),
+        md("""
+### 检测效果拼图
+"""),
+        code("""
+import matplotlib.pyplot as plt
+from vision_post import draw_boxes
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 9))
+for ax, (n, lat, b, c, s) in zip(axes.flat, compare):
+    ax.imshow(draw_boxes(img, b, c, s, LABELS))
+    ax.set_title(f"{n}  {lat:.0f}ms  {len(b)}个目标")
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
+"""),
+        md("""
 ## 小结
 
 - YOLOv5/v6/v8 把解码和 NMS 做进了模型，host 端几乎零后处理；
   YOLO26 输出原始检测头换取部署灵活性，后处理在 host 完成（见 `vision_post.decode_yolo26_heads`）。
-- 换 yolo26n/s/m 对比精度和耗时；官方参考 mAP@0.5:0.95: 26n 40.9 / 26s 48.6 / 26m 53.1（PyTorch FP32）。
+- 从对比可见：同一量化版本下模型越大越慢但检测更全；
+  官方参考 mAP@0.5:0.95: 26n 40.9 / 26s 48.6 / 26m 53.1（PyTorch FP32）。
+- 可以把量化下拉框切成 fp16 再跑一遍第 7 节，对比 i8 与 fp16 的速度差异。
 """),
     ]
     return notebook(cells)
@@ -1239,6 +1328,9 @@ for s, e, t in rows:
 import matplotlib.pyplot as plt
 import numpy as np
 import soundfile as sf
+from vision_post import setup_cjk_font
+
+setup_cjk_font()
 
 wav_path = "demos/forced_aligner/audio.wav"
 data, sr = sf.read(wav_path)

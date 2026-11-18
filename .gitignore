@@ -8,3 +8,7 @@ __pycache__/
 jupyter.log
 embedding_out.bin
 out.wav
+
+# Python 虚拟环境
+.venv/
+venv/

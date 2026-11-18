@@ -6,6 +6,25 @@ notebook 01-03 共用。所有函数都是纯 numpy/PIL 实现。
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+# ---------------------------------------------------------------- 绘图
+
+def setup_cjk_font():
+    """配置 matplotlib 中文字体（找不到 CJK 字体时保持默认）。"""
+    import matplotlib
+    from matplotlib import font_manager
+    # matplotlib 对 .ttc 只注册第一个字模（通常是 JP），JP 字体也含简体中文字形
+    for f in ("Noto Sans CJK JP", "Noto Serif CJK JP",
+              "Noto Sans CJK SC", "Noto Serif CJK SC",
+              "WenQuanYi Zen Hei", "WenQuanYi Micro Hei"):
+        try:
+            font_manager.findfont(f, fallback_to_default=False)
+            matplotlib.rcParams["font.sans-serif"] = [f, "DejaVu Sans"]
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    matplotlib.rcParams["axes.unicode_minus"] = False
+
+
 # ---------------------------------------------------------------- 前处理
 
 def letterbox(img, size=640, pad=(114, 114, 114)):
@@ -106,7 +125,7 @@ def decode_yolo26_heads(outputs, output_attrs, conf_thresh=0.4, nms_thresh=0.7,
     返回 (boxes[K,4], classes[K], scores[K])（模型输入坐标系）。
     """
     def sigmoid(x):
-        return 1.0 / (1.0 + np.exp(-x))
+        return 1.0 / (1.0 + np.exp(-np.clip(x, -60, 60)))
 
     # 按网格大小分组: box 头 shape=[1,4,h,w]，score 头 shape=[1,80,h,w]
     branches = {}
