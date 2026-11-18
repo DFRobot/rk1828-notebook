@@ -346,6 +346,18 @@ def build_02():
 ## 2. 选择模型和图片
 
 模型文件在 `models/yolo/<名称>/<量化>/` 下；图片可以换成自己的。
+
+**各模型的实际规格**（从权重体积判定）：
+
+| 目录名 | 实际规格 | 参数量 | 备注 |
+|---|---|---|---|
+| `yolov5` | **YOLOv5s** | 7.2M | i8/fp16 目录与内容一致 |
+| `yolov6` | **YOLOv6s** | 17.2M | ⚠️ `i8`/`fp16` 目录**疑似标反**（"i8"目录的权重更大且更慢，实测如此） |
+| `yolov8` | **YOLOv8s** | 11.2M | ⚠️ 同上，`i8`/`fp16` 目录**疑似标反** |
+| `yolo26n/s/m` | YOLO26n / 26s / 26m | 2.4M / 9.5M / 20.4M | 目录与内容一致 |
+
+> v6/v8 的目录问题来自瑞芯微官方 SDK 预转换包本身（i8 版本内嵌的 NMS
+> 后处理头以 fp16 存储，导致体积更大、速度更慢），选择时以实测为准。
 """),
         code("""
 import glob
@@ -457,6 +469,8 @@ from rknn3 import Rknn3Model
 from vision_post import (decode_builtin_nms, decode_yolo26_heads,
                          unletterbox_boxes)
 
+# 目录名 -> 实际规格: yolov5=YOLOv5s, yolov6=YOLOv6s, yolov8=YOLOv8s
+# 注意: yolov6/yolov8 的 i8 与 fp16 目录疑似标反（官方 SDK 包如此，见上文表格）
 ALL_MODELS = ["yolov5", "yolov6", "yolov8", "yolo26n", "yolo26s", "yolo26m"]
 QUANTS = ["i8", "fp16"]
 
@@ -551,9 +565,11 @@ plt.show()
   YOLO26 输出原始检测头换取部署灵活性，后处理在 host 完成（见 `vision_post.decode_yolo26_heads`）。
 - 一般规律：i8 比 fp16 快，模型越大越慢但检测更全；
   官方参考 mAP@0.5:0.95: 26n 40.9 / 26s 48.6 / 26m 53.1（PyTorch FP32）。
-- 模型命名说明：v5/v6/v8 是瑞芯微官方 SDK 的预转换模型，按家族名发布未带规格后缀；
-  从权重体积看 yolov5 接近 **yolov5s**（fp16 16.2MB），并非 yolov5n；
-  v6/v8 的 i8 权重文件反而比 fp16 大（i8 版本内嵌的 NMS 后处理头以 fp16 保存所致）。
+- 模型规格：v5/v6/v8 是瑞芯微官方 SDK 的预转换模型，按家族名发布。
+  从权重体积判定均为 **s 规格**：`yolov5`=YOLOv5s（7.2M 参数）、`yolov6`=YOLOv6s（17.2M）、
+  `yolov8`=YOLOv8s（11.2M），**都不是 n 规格**。
+  且 v6/v8 的 `i8`/`fp16` 目录疑似标反（"i8"目录权重更大、实测更慢），
+  原因是 i8 版本内嵌的 NMS 后处理头以 fp16 存储；选量化版本时以实测为准。
 """),
     ]
     return notebook(cells)
