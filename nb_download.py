@@ -52,6 +52,25 @@ def source_picker(default=DEFAULT_SOURCE):
     return w
 
 
+_UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
+                     "AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+
+
+def _open(url, timeout=60, max_redirects=5):
+    """urllib 的默认重定向处理不认 308（hf-mirror 偶发），手动跟进全部 3xx。"""
+    from urllib.parse import urljoin
+    for _ in range(max_redirects + 1):
+        req = urllib.request.Request(url, headers=_UA)
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
+                url = urljoin(url, e.headers["Location"])
+                continue
+            raise
+    raise RuntimeError(f"重定向次数过多: {url}")
+
+
 def _download(url, dst):
     """带重试的流式下载，先写 .part 再改名，失败不留半截文件。"""
     from urllib.parse import quote
@@ -62,10 +81,7 @@ def _download(url, dst):
     for attempt in range(3):
         try:
             # hf-mirror 会 403 拦截 Python-urllib 默认 UA，伪装成浏览器
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
-                                            "AppleWebKit/537.36 Chrome/120 Safari/537.36"})
-            with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            with _open(url) as r, open(tmp, "wb") as f:
                 total = int(r.headers.get("Content-Length") or 0)
                 done = 0
                 while True:
