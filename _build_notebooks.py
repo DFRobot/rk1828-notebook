@@ -867,7 +867,8 @@ def build_04():
                   """
 两个基于 **YOLO26** 的下游任务，都是官方 `rknn3-model-zoo` 的预编译 C++ demo：
 
-- **姿态估计**（pose）：检测人体 + 17 个关键点（n/s/m 三个规格，i8/fp16 两种量化）
+- **姿态估计**（pose）：检测人体 + 17 个关键点（n/s/m 三个规格，i8/fp16 两种量化；
+  例外：**m 规格只有 i8**——官方 SDK 包里的 m-pose fp16 权重是损坏的，实为 .rknn 文件的副本，故未收录）
 - **实例分割**（segment）：检测框 + 像素级掩码（n/s/m，i8/fp16）
 
 | 步骤 | 内容 |
@@ -898,12 +899,17 @@ display(w_size, w_quant)
 print("选好后继续往下运行 ▼")
 """),
         code("""
+import os
+
 DEMO = "demos/yolo26_pose"
 m = f"yolo26{w_size.value}-pose_{w_quant.value}"
-before = snapshot(DEMO)
-run_demo([f"./rknn_yolo26_pose_demo", f"model/{m}.rknn", f"model/{m}.weight",
-          "model/little_boy.jpg", "0x1"], DEMO)
-show_new_images(DEMO, before)
+if not os.path.exists(f"{DEMO}/model/{m}.weight"):
+    print(f"⚠️ {m} 不存在：m 规格的 fp16 权重在官方 SDK 中损坏，请改用 i8 或 n/s 规格")
+else:
+    before = snapshot(DEMO)
+    run_demo([f"./rknn_yolo26_pose_demo", f"model/{m}.rknn", f"model/{m}.weight",
+              "model/little_boy.jpg", "0x1"], DEMO)
+    show_new_images(DEMO, before)
 """),
         md("""
 ## 4. 实例分割（检测框 + 像素掩码）
